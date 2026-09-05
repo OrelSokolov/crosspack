@@ -1,0 +1,115 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'optparse'
+
+begin
+  require 'crosspack'
+rescue LoadError
+  require_relative '../lib/crosspack'
+end
+
+def abort_with(message)
+  warn message
+  exit 1
+end
+
+options = { file: 'deps.yaml', package: 'package.yaml', arch: 'amd64', format: nil,
+            version: nil, root: Dir.pwd, output_base: 'crosspacks' }
+parser = OptionParser.new do |opts|
+  opts.banner = "crosspack #{Crosspack::VERSION} — native package packer (deb/rpm/PKGBUILD/MSI/app)\n" \
+                "Usage: crosspack <command> [options]\n" \
+                'Commands: validate, resolve, matrix, pack, targets'
+
+  opts.on('-f', '--file PATH', 'path to deps.yaml (default: ./deps.yaml)') { |v| options[:file] = v }
+  opts.on('--package PATH', 'path to package.yaml (default: ./package.yaml)') { |v| options[:package] = v }
+  opts.on('--target TARGET', 'target: debian-12, ubuntu-24.04, fedora-41, arch, macos, windows') { |v| options[:target] = v }
+  opts.on('--arch ARCH', 'architecture: amd64/x86_64, arm64/aarch64 (default: amd64)') { |v| options[:arch] = v }
+  opts.on('--format FORMAT', 'output format for resolve: deb, rpm, pkgbuild (default: derived from the target)') { |v| options[:format] = v.to_sym }
+  opts.on('--version VERSION', 'package version for pack (required for pack)') { |v| options[:version] = v }
+  opts.on('--root PATH', 'project root for relative paths (default: .)') { |v| options[:root] = v }
+  opts.on('--output-base DIR', 'output directory (default: ./crosspacks)') { |v| options[:output_base] = v }
+  opts.on('-h', '--help', 'show help') do
+    puts opts
+    exit
+  end
+end
+parser.parse!
+
+command = ARGV.shift
+abort_with 'No command given. See: crosspack --help' if command.nil?
+
+# Positional file path: crosspack validate path/to/deps.yaml
+options[:file] = ARGV.shift if ARGV.first && !ARGV.first.start_with?('-')
+
+begin
+  manifest = Crosspack::Manifest.load(options[:file])
+rescue Crosspack::InvalidManifestError => e
+  abort_with e.message
+end
+
+case command
+when 'validate'
+  begin
+    pkg = Crosspack::PackageManifest.load(options[:package])
+  rescue Crosspack::InvalidManifestError => e
+    abort_with e.message
+  end
+  puts manifest.error_report
+  puts pkg.error_report
+  exit(manifest.valid? && pkg.valid? ? 0 : 1)
+when 'matrix'
+  abort_with 'Schema is invalid — the matrix cannot be built. Run: crosspack validate' unless manifest.valid?
+  puts Crosspack::Matrix.new(manifest).render
+when 'resolve'
+  abort_with 'Specify a target: --target debian-12 (see crosspack --help)' unless options[:target]
+  begin
+    target = Crosspack::Target.parse(options[:target], arch: options[:arch])
+  rescue Crosspack::Target::Error => e
+    abort_with "Invalid target #{options[:target].inspect}: #{e.message}"
+  end
+  begin
+    resolver = Crosspack::Resolver.new(manifest)
+    format = options[:format] || target.format
+    result = resolver.depends(target, format: format)
+    if result.is_a?(Array)
+      puts "# #{target} (#{format})"
+      result.each { |d| puts d }
+    else
+      puts "# #{target} (#{format})"
+      puts "Depends: #{result}"
+    end
+  rescue Crosspack::ResolveError => e
+    abort_with "Failed to resolve dependencies for #{target}:\n  #{e.message}"
+  end
+when 'pack'
+  abort_with 'Specify a target: --target debian-12 and a version: --version 1.0-1' unless options[:target] && options[:version]
+  begin
+    target = Crosspack::Target.parse(options[:target], arch: options[:arch])
+    path = Crosspack.pack(
+      manifest: options[:package],
+      deps: options[:file],
+      target: target,
+      version: options[:version],
+      root: options[:root],
+      output_base: options[:output_base]
+    )
+  rescue Crosspack::Target::Error => e
+    abort_with "Invalid target #{options[:target].inspect}: #{e.message}"
+  rescue Crosspack::InvalidManifestError, Crosspack::ResolveError, Crosspack::BuildError => e
+    abort_with e.message
+  end
+  puts "📦 #{path}"
+when 'targets'
+  # What can actually be packed: builds tree + resolvable deps per target.
+  pkg_path = File.expand_path(options[:package], options[:root])
+  sources = begin
+    Crosspack::PackageManifest.load(pkg_path).sources
+  rescue Crosspack::InvalidManifestError
+    nil
+  end
+  root = sources ? File.expand_path(sources, options[:root]) : File.join(options[:root], 'builds')
+  puts Crosspack::Builds.report(root)
+else
+  abort_with "Unknown command #{command.inspect}. Available: validate, resolve, matrix, pack, targets"
+end
