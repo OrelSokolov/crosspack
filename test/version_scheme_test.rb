@@ -17,7 +17,7 @@ class VersionSchemeTest < Minitest::Test
   def test_git_tag
     Dir.mktmpdir('crossbuild-git') do |dir|
       system('git init -q', chdir: dir) or flunk 'git init failed'
-      system('git commit --allow-empty -m init -q', chdir: dir) or flunk 'git commit failed'
+      system('git -c user.name=Test -c user.email=test@example.com commit --allow-empty -m init -q', chdir: dir) or flunk 'git commit failed'
       system('git tag v1.2.3', chdir: dir) or flunk 'git tag failed'
       assert_equal 'v1.2.3', Crossbuild::VersionScheme.new('git-tag').compute(root: dir)
     end

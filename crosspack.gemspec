@@ -19,8 +19,7 @@ Gem::Specification.new do |spec|
 
   spec.metadata = {
     'source_code_uri' => 'https://github.com/OrelSokolov/crosspack',
-    'changelog_uri' => 'https://github.com/OrelSokolov/crosspack/blob/main/CHANGELOG.md',
-    'rubygems_mfa_required' => 'true'
+    'changelog_uri' => 'https://github.com/OrelSokolov/crosspack/blob/main/CHANGELOG.md'
   }
 
   spec.required_ruby_version = '>= 3.2.0'
