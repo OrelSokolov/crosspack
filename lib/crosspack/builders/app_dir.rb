@@ -4,7 +4,7 @@ require 'fileutils'
 
 module Crosspack
   module Builders
-    # Stages a macOS .app bundle directory (H2Voice.app/Contents/...). A real
+    # Stages a macOS .app bundle directory (MyApp.app/Contents/...). A real
     # DMG requires hdiutil (macOS only); from Linux this directory layout is
     # the honest maximum — it can be zipped or wrapped into a DMG on a Mac
     # as-is.

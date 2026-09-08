@@ -96,8 +96,8 @@ class BuildersTest < Minitest::Test
     output = File.join(@tmpdir, 'PKGBUILD')
     Crosspack::Builders::Pkgbuild.generate(
       name: 'app', version: '2026.08.31', release: '1234',
-      pkgdesc: 'Test app', depends: ['webkit2gtk-4.1', 'gtk3'],
-      arch: ['x86_64'],
+      pkgdesc: 'Test app', maintainer: 'Test <t@example.com>',
+      depends: ['webkit2gtk-4.1', 'gtk3'], arch: ['x86_64'],
       files: { 'app' => 'usr/local/lib/app/app', 'model.bin' => 'usr/local/lib/app/model.bin' },
       symlinks: { 'usr/local/bin/app' => '../lib/app/app' },
       executables: ['usr/local/lib/app/app'],

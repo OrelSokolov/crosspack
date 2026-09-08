@@ -34,7 +34,11 @@ parser = OptionParser.new do |opts|
     exit
   end
 end
-parser.parse!
+begin
+  parser.parse!
+rescue OptionParser::InvalidOption, OptionParser::MissingArgument => e
+  abort_with "#{e.message}\nSee: crosspack --help"
+end
 
 command = ARGV.shift
 abort_with 'No command given. See: crosspack --help' if command.nil?

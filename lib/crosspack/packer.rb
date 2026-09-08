@@ -169,6 +169,7 @@ module Crosspack
         version: version,
         release: release,
         pkgdesc: @pkg.summary,
+        maintainer: @pkg.maintainer,
         depends: resolved_depends(:pkgbuild),
         arch: [@target.package_arch(:pkgbuild)],
         # PKGBUILD sources are archive-relative names, not local paths.

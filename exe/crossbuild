@@ -1,0 +1,76 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'optparse'
+
+begin
+  require 'crossbuild'
+rescue LoadError
+  require_relative '../lib/crossbuild'
+end
+
+def abort_with(message)
+  warn message
+  exit 1
+end
+
+options = { file: 'build.yaml', root: Dir.pwd, target: nil, version: nil, output_base: nil }
+parser = OptionParser.new do |opts|
+  opts.banner = "crossbuild #{Crossbuild::VERSION} — cross-platform build orchestrator\n" \
+                "Usage: crossbuild <command> [options]\n" \
+                'Commands: validate, matrix, version, build, targets'
+
+  opts.on('-f', '--file PATH', 'path to build.yaml (default: ./build.yaml)') { |v| options[:file] = v }
+  opts.on('--target ID', 'matrix entry to build, e.g. linux/amd64 (default: every host-buildable entry)') { |v| options[:target] = v }
+  opts.on('--version VERSION', 'override the version scheme for build') { |v| options[:version] = v }
+  opts.on('--root PATH', 'project root for relative paths (default: .)') { |v| options[:root] = v }
+  opts.on('--output-base DIR', 'output directory (default: the manifest output, builds)') { |v| options[:output_base] = v }
+  opts.on('-h', '--help', 'show help') do
+    puts opts
+    exit
+  end
+end
+parser.parse!
+
+command = ARGV.shift
+abort_with 'No command given. See: crossbuild --help' if command.nil?
+
+# Positional file path: crossbuild validate path/to/build.yaml
+options[:file] = ARGV.shift if ARGV.first && !ARGV.first.start_with?('-')
+
+file = File.expand_path(options[:file], options[:root])
+begin
+  manifest = Crossbuild::BuildManifest.load(file)
+rescue Crossbuild::InvalidManifestError => e
+  abort_with e.message
+end
+
+case command
+when 'validate'
+  puts manifest.error_report
+  exit(manifest.valid? ? 0 : 1)
+when 'matrix'
+  abort_with 'Schema is invalid — the matrix cannot be rendered. Run: crossbuild validate' unless manifest.valid?
+  puts Crossbuild::Matrix.new(manifest).render
+when 'version'
+  abort_with 'Schema is invalid. Run: crossbuild validate' unless manifest.valid?
+  begin
+    puts Crossbuild::VersionScheme.new(manifest.version).compute(root: options[:root])
+  rescue Crossbuild::VersionScheme::Error => e
+    abort_with e.message
+  end
+when 'build'
+  begin
+    result = Crossbuild::Builder.new(manifest, root: options[:root], output_base: options[:output_base],
+                                     version: options[:version]).run(entry_id: options[:target])
+  rescue Crossbuild::Error, Crosspack::InvalidManifestError => e
+    abort_with e.message
+  end
+  puts "\n📦 #{result.entries.size} entr#{result.entries.size == 1 ? 'y' : 'ies'} built, version #{result.version}"
+  puts 'Pack with: crosspack pack --target <target> --version ' + result.version
+when 'targets'
+  base = options[:output_base] || manifest.output
+  puts Crosspack::Builds.report(File.expand_path(base, options[:root]))
+else
+  abort_with "Unknown command #{command.inspect}. Available: validate, matrix, version, build, targets"
+end
