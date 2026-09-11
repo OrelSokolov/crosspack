@@ -27,8 +27,17 @@ module Crosspack
         "#{hex[0, 8]}-#{hex[8, 4]}-#{hex[12, 4]}-#{hex[16, 4]}-#{hex[20, 12]}"
       end
 
+      # Escapes XML entities so manifest values (e.g. a maintainer with
+      # "Name <email>") never break the generated .wxs.
+      def self.escape(text)
+        text.to_s.gsub('&', '&amp;').gsub('<', '&lt;').gsub('>', '&gt;').gsub('"', '&quot;')
+      end
+
       def self.generate_wxs(name:, version:, manufacturer:, summary:, files:,
                             arch: 'x64')
+        name = escape(name)
+        manufacturer = escape(manufacturer)
+        summary = escape(summary)
         directory = arch == 'arm64' ? 'ProgramFiles6432Folder' : 'ProgramFiles64Folder'
         components = files.values.each_with_index.map do |dst, i|
           src = files.key(dst).gsub('/', '\\')
@@ -97,7 +106,7 @@ module Crosspack
           return wxs_path
         end
 
-        out, status = Open3.capture2e(wix, 'build', "-arch #{arch}",
+        out, status = Open3.capture2e(wix, 'build', '-arch', arch.to_s,
                                       '-o', output, wxs_path)
         unless status.success?
           raise BuildError, "wix build failed to build #{output}:\n#{out}"
@@ -105,11 +114,12 @@ module Crosspack
         output
       end
 
+      # WiX v4+ is a .NET tool invoked as `wix` (dotnet tool install -g wix);
+      # plain `dotnet` cannot build an MSI, so it is not a fallback.
       def self.wix_command
-        %w[wix dotnet].each do |cmd|
-          _, _, status = Open3.capture3(cmd, '--version')
-          return cmd if status.success?
-        end
+        _, _, status = Open3.capture3('wix', '--version')
+        return 'wix' if status.success?
+
         nil
       rescue Errno::ENOENT
         nil

@@ -147,6 +147,8 @@ class PackerTest < Minitest::Test
     assert_includes content, 'Name="app"'
     assert_includes content, 'ProgramFiles64Folder'
     assert_includes content, 'Source='
+    # Maintainer with "Name <email>" must be XML-escaped, not inlined raw.
+    assert_includes content, 'Manufacturer="Test &lt;t@example.com&gt;"'
     assert File.file?(File.join(File.dirname(path), 'BUILD-MSI.txt'))
   end
 
