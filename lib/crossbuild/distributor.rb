@@ -8,7 +8,12 @@ module Crossbuild
   # crosspacks/ tree crosspack writes, so crosspack can pack straight from it.
   # Items are symlinked by default (packers copy through symlinks); copy mode
   # is available for trees that get archived or shipped as-is.
+  #
+  # The build version is stamped into .crosspack-build in every target
+  # directory, so a later `crosspack pack <target>` needs no --version.
   class Distributor
+    STAMP_NAME = Crosspack::Builds::STAMP_NAME
+
     attr_reader :placed_dirs
 
     def initialize(root:, output_base:)
@@ -18,7 +23,9 @@ module Crossbuild
     end
 
     # Returns the list of builds/ directories that received artifacts.
-    def distribute(entry, host_arch:)
+    # only: distribute to just this raw target string (from artifacts.to)
+    # instead of all of them — used by `crosspack build <target>`.
+    def distribute(entry, host_arch:, version: nil, only: nil)
       spec = entry.artifacts
       return [] unless spec
 
@@ -30,11 +37,17 @@ module Crossbuild
       items = select_items(from_dir, spec.include)
       arch = entry.arch == :any ? host_arch : entry.arch
 
-      spec.to.each do |raw|
+      targets = only ? spec.to.select { |raw| raw == only } : spec.to
+      if targets.empty?
+        raise Error, "#{entry.id} does not distribute to #{only.inspect} (its targets: #{spec.to.join(', ')})"
+      end
+
+      targets.each do |raw|
         target = Crosspack::Target.parse(raw, arch: arch)
         dst_dir = target.output_dir(File.expand_path(@output_base, @root))
         FileUtils.mkdir_p(dst_dir)
         items.each { |item| place(item, File.join(dst_dir, File.basename(item)), spec.mode) }
+        File.write(File.join(dst_dir, STAMP_NAME), "#{version}\n") if version
         @placed_dirs << dst_dir
       end
       @placed_dirs.uniq

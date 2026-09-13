@@ -24,9 +24,10 @@ module Crossbuild
     ARCH_LIST = %w[amd64 x86_64 arm64 aarch64 any].freeze
     ARTIFACT_MODES = %w[symlink copy].freeze
     VERSION_SCHEMES = %w[calver git-tag].freeze
-    TOP_LEVEL_KEYS = %w[name version output matrix].freeze
+    TOP_LEVEL_KEYS = %w[name version output deps matrix].freeze
     ENTRY_KEYS = %w[id build env steps artifacts].freeze
     ARTIFACTS_KEYS = %w[from include to mode].freeze
+    DEP_KEYS = %w[hosts].freeze
     BUILD_RE = /\A(linux|darwin|windows)\/(#{ARCH_LIST.join('|')})\z/.freeze
     NAME_RE = /\A[a-z0-9][a-z0-9+._-]*\z/i.freeze
 
@@ -54,6 +55,22 @@ module Crossbuild
       end
     end
 
+    # A build dependency from the top-level deps: section. `hosts` maps a
+    # host selector (distro id from os-release, ID_LIKE token, os name or
+    # "*") to a rule with per-system commands:
+    #   verify:  presence probe (default: PATH lookup of the name)
+    #   install: how to install it (a verify-only rule may omit this)
+    class Dependency
+      RULE_KEYS = %w[verify install].freeze
+
+      attr_reader :name, :hosts
+
+      def initialize(name, hosts)
+        @name = name
+        @hosts = hosts
+      end
+    end
+
     # Where artifacts come from and which builds/ directories they fan out to.
     class Artifacts
       attr_reader :from, :include, :to, :mode
@@ -66,7 +83,7 @@ module Crossbuild
       end
     end
 
-    attr_reader :path, :name, :version, :output, :entries, :errors, :warnings
+    attr_reader :path, :name, :version, :output, :deps, :entries, :errors, :warnings
 
     def self.load(path)
       unless File.file?(path)
@@ -89,6 +106,7 @@ module Crossbuild
       @name = nil
       @version = nil
       @output = 'builds'
+      @deps = []
       @entries = []
       @errors = []
       @warnings = []
@@ -132,6 +150,26 @@ module Crossbuild
       @entries.find { |e| e.id == id }
     end
 
+    # The single matrix entry that distributes artifacts to the given target
+    # string (e.g. "ubuntu-24.04"). Raises Crossbuild::Error when no entry
+    # claims it or when several do (ambiguous).
+    def entry_for_target(raw)
+      matches = @entries.select { |e| e.artifacts&.to&.include?(raw) }
+      declared = @entries.filter_map { |e| e.artifacts&.to }.flatten.uniq
+      if matches.empty?
+        raise Error,
+              "no matrix entry distributes to target #{raw.inspect}; " \
+              "declared targets: #{declared.join(', ')}"
+      end
+      if matches.size > 1
+        raise Error,
+              "target #{raw.inspect} is distributed by several entries " \
+              "(#{matches.map(&:id).join(', ')}) — crosspack build <target> needs exactly one"
+      end
+
+      matches.first
+    end
+
     private
 
     def validate
@@ -144,6 +182,7 @@ module Crossbuild
       validate_name
       validate_version
       validate_output
+      validate_deps
       validate_matrix
     end
 
@@ -182,6 +221,76 @@ module Crossbuild
       else
         @errors << Issue.new('output', "must be a non-empty directory name (default: builds), got #{out.inspect}")
       end
+    end
+
+    def validate_deps
+      deps = @raw['deps']
+      return if deps.nil?
+
+      unless deps.is_a?(Hash)
+        @errors << Issue.new(
+          'deps',
+          "must be a mapping of dependency name -> {check?, hosts}; expected:\n" \
+          "    deps:\n" \
+          "      imagemagick:\n" \
+          "        check: magick -version\n" \
+          "        hosts:\n" \
+          "          ubuntu: sudo apt-get install -y imagemagick"
+        )
+        return
+      end
+
+      deps.each { |name, body| validate_dep(name, body) }
+    end
+
+    def validate_dep(name, body)
+      path = "deps.#{name}"
+      if name !~ NAME_RE
+        @errors << Issue.new(path, "invalid dependency name #{name.inspect} (letters, digits, \"+\", \"_\", \"-\", \".\")")
+        return
+      end
+      unless body.is_a?(Hash)
+        @errors << Issue.new(path, 'must be a mapping with the key: hosts')
+        return
+      end
+      check_unknown_keys(path, body.keys, DEP_KEYS)
+
+      hosts = body['hosts']
+      unless hosts.is_a?(Hash) && !hosts.empty?
+        @errors << Issue.new(
+          "#{path}.hosts",
+          "must be a non-empty mapping of host selector -> {verify?, install?}; expected:\n" \
+          "    deps:\n" \
+          "      #{name}:\n" \
+          "        hosts:\n" \
+          "          ubuntu:\n" \
+          "            verify: dpkg -s #{name}\n" \
+          "            install: sudo apt-get install -y #{name}"
+        )
+        return
+      end
+      hosts.each { |selector, rule| validate_host_rule(name, selector, rule) }
+      return unless valid_dep?(name, body)
+
+      @deps << Dependency.new(name, hosts)
+    end
+
+    def validate_host_rule(name, selector, rule)
+      path = "deps.#{name}.hosts.#{selector}"
+      unless rule.is_a?(Hash) && !rule.empty?
+        @errors << Issue.new(path, "must be a mapping with verify and/or install commands, e.g. { install: sudo apt-get install -y #{name} }")
+        return
+      end
+      check_unknown_keys(path, rule.keys, Dependency::RULE_KEYS)
+      rule.each do |key, command|
+        unless command.is_a?(String) && !command.strip.empty?
+          @errors << Issue.new("#{path}.#{key}", 'must be a non-empty shell command')
+        end
+      end
+    end
+
+    def valid_dep?(name, body)
+      @errors.none? { |e| e.path.start_with?("deps.#{name}") }
     end
 
     def validate_matrix

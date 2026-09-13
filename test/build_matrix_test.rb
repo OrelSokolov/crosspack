@@ -34,4 +34,64 @@ class BuildMatrixTest < Minitest::Test
     out = Crossbuild::Matrix.new(manifest, host_os: :darwin, host_arch: :arm64).render
     assert_includes out, 'Nothing can build on this host'
   end
+
+  def test_render_lists_deps_resolution_for_host
+    m = load_manifest(<<~YAML)
+      name: myapp
+      deps:
+        imagemagick:
+          hosts:
+            ubuntu:
+              verify: dpkg -s imagemagick
+              install: sudo apt-get install -y imagemagick
+      matrix:
+        - build: linux/amd64
+          steps: [make]
+    YAML
+    out = Crossbuild::Matrix.new(m, host_os: :linux, host_arch: :x86_64,
+                                 selectors: ['ubuntu', 'linux', '*']).render
+    assert_includes out, 'deps on this host'
+    assert_includes out, '⚙ imagemagick'
+    assert_includes out, 'ubuntu -> sudo apt-get install -y imagemagick'
+  end
+
+  def test_render_flags_verify_only_dep_rule
+    m = load_manifest(<<~YAML)
+      name: myapp
+      deps:
+        curl:
+          hosts:
+            "*": {verify: curl --version}
+      matrix:
+        - build: linux/amd64
+          steps: [make]
+    YAML
+    out = Crossbuild::Matrix.new(m, host_os: :linux, host_arch: :x86_64,
+                                 selectors: ['linux', '*']).render
+    assert_includes out, '⚙ curl'
+    assert_includes out, '(verify only: curl --version)'
+  end
+
+  def test_render_flags_dep_without_rule_for_host
+    m = load_manifest(<<~YAML)
+      name: myapp
+      deps:
+        imagemagick:
+          hosts:
+            darwin: {install: brew install imagemagick}
+      matrix:
+        - build: linux/amd64
+          steps: [make]
+    YAML
+    out = Crossbuild::Matrix.new(m, host_os: :linux, host_arch: :x86_64,
+                                 selectors: ['linux', '*']).render
+    assert_includes out, '✗ imagemagick'
+    assert_includes out, 'no rule for this host'
+    assert_includes out, 'described: darwin'
+  end
+
+  def test_render_without_deps_omits_section
+    out = Crossbuild::Matrix.new(manifest, host_os: :linux, host_arch: :x86_64).render
+    refute_includes out, 'deps on this host'
+  end
 end

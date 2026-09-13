@@ -8,8 +8,10 @@ module Crosspack
   # package.yaml), resolves dependencies for the target (per deps.yaml) and
   # produces a native package under output_base/<family>/<version>/<arch>/.
   # The builder is chosen by the target format — deb, rpm or PKGBUILD.
+  # version: when omitted, the version stamped by `crosspack build <target>`
+  # (.crosspack-build in the target's builds/ directory) is used.
   class Packer
-    def self.pack(manifest:, deps:, target:, version:, root: Dir.pwd,
+    def self.pack(manifest:, deps:, target:, version: nil, root: Dir.pwd,
                   output_base: 'crosspacks')
       new(manifest: manifest, deps: deps, target: target, version: version,
           root: root, output_base: output_base).pack
@@ -19,15 +21,16 @@ module Crosspack
       @pkg_path = manifest
       @deps_path = deps
       @target = target
-      @version = version.to_s
+      @version = version && version.to_s
       @root = root
-      @output_base = output_base
+      @output_base = output_base || 'crosspacks'
     end
 
     def pack
       @pkg = PackageManifest.load(@pkg_path)
       @deps = Manifest.load(@deps_path)
       validate_both!
+      resolve_version!
       @pkg_data = build_layout
 
       case @target.format
@@ -48,6 +51,21 @@ module Crosspack
     end
 
     private
+
+    # --version wins; otherwise the version recorded by the build stage.
+    def resolve_version!
+      return unless @version.nil? || @version.strip.empty?
+
+      stamped = Builds.version_for(@target, File.expand_path(@pkg.sources, @root))
+      if stamped.nil? || stamped.strip.empty?
+        raise BuildError,
+              "No version for target #{@target}: no --version given and no build stamp " \
+              "(#{Builds::STAMP_NAME}) in #{@pkg.sources}. " \
+              "Run: crosspack build #{@target} — or pass --version explicitly."
+      end
+
+      @version = stamped
+    end
 
     def validate_both!
       errors = []
@@ -70,10 +88,10 @@ module Crosspack
         hint = available.empty? ? 'no built targets at all.' :
                "available builds: #{available.map { |t| "#{t} (#{t.output_dir(@pkg.sources, t.format)})" }.join(', ')}."
         raise BuildError,
-              "No compiled artifacts for target #{@target}: expected them in #{src_dir}.\n" \
+              "Build stage not done for target #{@target}: expected compiled artifacts in #{src_dir}.\n" \
               "The builds tree (#{@pkg.sources}) mirrors the output tree: builds/<family>/<version>/<arch>/. " \
               "Currently #{hint}\n" \
-              'Build the application for this target first, then pack.'
+              "Run: crosspack build #{@target}"
       end
 
       lib_dst = File.join(@pkg.prefix, @pkg.lib_dir)

@@ -111,4 +111,42 @@ class ManifestTest < Minitest::Test
     error = assert_raises(Crosspack::InvalidManifestError) { Crosspack::Manifest.load(file) }
     assert_includes error.message, 'YAML syntax error'
   end
+
+  def test_schema_version_absent_means_current
+    m = load_manifest("webkit2gtk:\n  targets:\n    debian:\n      \"12\": [pkg]\n")
+    assert m.valid?
+    assert_nil m.schema_version
+  end
+
+  def test_schema_version_current_is_accepted
+    m = load_manifest("version: #{Crosspack::Manifest::SCHEMA_VERSION}\nwebkit2gtk:\n  targets:\n    debian:\n      \"12\": [pkg]\n")
+    assert m.valid?
+    assert_equal Crosspack::Manifest::SCHEMA_VERSION, m.schema_version
+    # The reserved key is not a dependency.
+    assert_equal %w[webkit2gtk], m.deps.keys
+    assert_empty m.warnings.map(&:to_s).grep(/version/)
+  end
+
+  def test_schema_version_newer_raises_at_load_with_upgrade_hint
+    error = assert_raises(Crosspack::InvalidManifestError) do
+      load_manifest("version: #{Crosspack::Manifest::SCHEMA_VERSION + 1}\nwebkit2gtk:\n  targets:\n    debian:\n      \"12\": [pkg]\n")
+    end
+    assert_includes error.message, "schema version #{Crosspack::Manifest::SCHEMA_VERSION + 1}"
+    assert_includes error.message, "supports up to #{Crosspack::Manifest::SCHEMA_VERSION}"
+    assert_includes error.message, 'gem update crosspack'
+  end
+
+  def test_schema_version_malformed_is_schema_error
+    m = load_manifest("version: latest\nwebkit2gtk:\n  targets:\n    debian:\n      \"12\": [pkg]\n")
+    refute m.valid?
+    assert(m.errors.any? { |e| e.path == 'version' && e.message.include?('integer >= 1') })
+
+    m = load_manifest("version: 1.5\nwebkit2gtk:\n  targets:\n    debian:\n      \"12\": [pkg]\n")
+    refute m.valid?
+    assert(m.errors.any? { |e| e.path == 'version' })
+
+    m = load_manifest("version: 0\nwebkit2gtk:\n  targets:\n    debian:\n      \"12\": [pkg]\n")
+    refute m.valid?
+    assert(m.errors.any? { |e| e.path == 'version' })
+  end
 end

@@ -36,5 +36,38 @@ module Crossbuild
     def self.display_arch(arch)
       arch == :x86_64 ? 'amd64' : arch.to_s
     end
+
+    # Distro id from /etc/os-release ("ubuntu", "fedora", ...), nil off Linux.
+    def self.distro
+      return nil unless os == :linux
+
+      facts = os_release
+      facts['ID']
+    end
+
+    # Ordered host selectors for the deps: matrix of build.yaml — distro id,
+    # then ID_LIKE tokens (Linux only), then the os, then "*" as the final
+    # wildcard. The first selector with a matching rule wins.
+    def self.selectors
+      sel = []
+      if os == :linux
+        facts = os_release
+        sel << facts['ID'] if facts['ID']
+        sel.concat(facts['ID_LIKE'].to_s.split)
+      end
+      sel << os.to_s << '*'
+    end
+
+    # Parses /etc/os-release into a Hash (ID, ID_LIKE, ...); {} when absent.
+    def self.os_release(path: '/etc/os-release')
+      File.read(path).each_line.with_object({}) do |line, facts|
+        key, value = line.split('=', 2)
+        next if value.nil?
+
+        facts[key.strip] = value.strip.delete_prefix('"').delete_suffix('"')
+      end
+    rescue Errno::ENOENT
+      {}
+    end
   end
 end

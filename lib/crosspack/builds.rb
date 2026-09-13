@@ -8,6 +8,10 @@ module Crosspack
   module Builds
     ARCH_DIR_RE = /\A(amd64|x86_64|x64|arm64|aarch64)\z/i.freeze
 
+    # Written by `crosspack build <target>` into every builds/<target>/
+    # directory; `crosspack pack <target>` reads it as the default version.
+    STAMP_NAME = '.crosspack-build'
+
     # Returns [Target] for every target directory found under root.
     def self.available(root)
       return [] unless File.directory?(root)
@@ -28,6 +32,14 @@ module Crosspack
       lines = ["Available builds in #{root}:"]
       targets.each { |t| lines << "  #{t}  (#{t.output_dir(root, t.format)})" }
       lines.join("\n")
+    end
+
+    # The version stamped by `crosspack build <target>` into the target's
+    # builds/ directory, or nil when the directory has no stamp (packed by
+    # an older build or never built through the stage pipeline).
+    def self.version_for(target, root)
+      stamp = File.join(target.output_dir(root.to_s, target.format), STAMP_NAME)
+      File.exist?(stamp) ? File.read(stamp).strip : nil
     end
 
     private

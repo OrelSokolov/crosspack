@@ -122,4 +122,48 @@ class DistributorTest < Minitest::Test
 
     assert File.directory?(File.join(@dir, 'builds', 'macos', 'aarch64', 'MyApp.app'))
   end
+
+  def test_stamps_build_version_per_target
+    e = entry(<<~YAML)
+      - build: linux/amd64
+        steps: ['true']
+        artifacts: { from: build/bin, include: [myapp], to: [debian-12, ubuntu-24.04] }
+    YAML
+    Crossbuild::Distributor.new(root: @dir, output_base: 'builds')
+                           .distribute(e, host_arch: :x86_64, version: '1.2.3')
+
+    stamp = File.join(@dir, 'builds', 'debian', '12', 'amd64', Crossbuild::Distributor::STAMP_NAME)
+    assert_equal '1.2.3', File.read(stamp).strip
+
+    target = Crosspack::Target.parse('debian-12', arch: :x86_64)
+    assert_equal '1.2.3', Crosspack::Builds.version_for(target, File.join(@dir, 'builds'))
+  end
+
+  def test_only_distributes_to_the_requested_target
+    e = entry(<<~YAML)
+      - build: linux/amd64
+        steps: ['true']
+        artifacts: { from: build/bin, include: [myapp], to: [debian-12, ubuntu-24.04] }
+    YAML
+    Crossbuild::Distributor.new(root: @dir, output_base: 'builds')
+                           .distribute(e, host_arch: :x86_64, version: '1.0', only: 'ubuntu-24.04')
+
+    assert File.exist?(File.join(@dir, 'builds', 'ubuntu', '24.04', 'amd64', 'myapp'))
+    debian_dir = File.join(@dir, 'builds', 'debian')
+    refute(File.directory?(debian_dir) && !Dir.empty?(debian_dir),
+           'debian must stay untouched when only ubuntu was requested')
+  end
+
+  def test_only_with_unknown_target_raises
+    e = entry(<<~YAML)
+      - build: linux/amd64
+        steps: ['true']
+        artifacts: { from: build/bin, include: [myapp], to: [debian-12] }
+    YAML
+    error = assert_raises(Crossbuild::Error) do
+      Crossbuild::Distributor.new(root: @dir, output_base: 'builds')
+                             .distribute(e, host_arch: :x86_64, only: 'fedora-41')
+    end
+    assert_includes error.message, 'fedora-41'
+  end
 end

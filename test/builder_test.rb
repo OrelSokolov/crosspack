@@ -138,6 +138,130 @@ class BuilderTest < Minitest::Test
     assert File.exist?(File.join(@dir, 'builds', 'debian', '12', host_deb_arch, 'marker'))
   end
 
+  def test_build_installs_missing_dep_first
+    m = write_manifest(<<~YAML)
+      name: app
+      version: '1.0'
+      deps:
+        imagemagick:
+          hosts:
+            "*":
+              verify: test -f #{@dir}/dep-marker
+              install: touch #{@dir}/dep-marker
+      matrix:
+        - build: #{host_platform}
+          steps: [echo ok > #{@dir}/built.txt]
+    YAML
+    capturing_stdout do
+      Crossbuild::Builder.new(m, root: @dir, host_os: host_os, host_arch: host_arch).run
+    end
+    assert File.exist?(File.join(@dir, 'dep-marker')), 'dep install command did not run'
+    assert File.exist?(File.join(@dir, 'built.txt'))
+  end
+
+  def test_build_fails_when_dep_cannot_be_installed
+    m = write_manifest(<<~YAML)
+      name: app
+      version: '1.0'
+      deps:
+        broken:
+          hosts:
+            "*":
+              verify: test -f #{@dir}/never
+              install: exit 9
+      matrix:
+        - build: #{host_platform}
+          steps: [echo ok > #{@dir}/built.txt]
+    YAML
+    error = assert_raises(Crossbuild::DepInstaller::DepError) do
+      capturing_stdout do
+        Crossbuild::Builder.new(m, root: @dir, host_os: host_os, host_arch: host_arch).run
+      end
+    end
+    assert_includes error.message, 'install command failed'
+    refute File.exist?(File.join(@dir, 'built.txt'))
+  end
+
+  def test_build_with_deps_false_skips_dep_pass
+    m = write_manifest(<<~YAML)
+      name: app
+      version: '1.0'
+      deps:
+        broken:
+          hosts:
+            "*":
+              verify: test -f #{@dir}/never
+              install: exit 9
+      matrix:
+        - build: #{host_platform}
+          steps: [echo ok > #{@dir}/built.txt]
+    YAML
+    capturing_stdout do
+      Crossbuild::Builder.new(m, root: @dir, deps: false, host_os: host_os, host_arch: host_arch).run
+    end
+    assert File.exist?(File.join(@dir, 'built.txt'))
+    refute File.exist?(File.join(@dir, 'never'))
+  end
+
+  def test_build_target_distributes_only_that_target
+    m = write_manifest(<<~YAML)
+      name: app
+      version: '1.0'
+      matrix:
+        - build: #{host_platform}
+          steps: ['echo {{name}} > build-out.txt']
+          artifacts:
+            from: .
+            include: [build-out.txt]
+            to: [debian-12, ubuntu-24.04]
+    YAML
+    result = nil
+    capturing_stdout do
+      result = Crossbuild::Builder.new(m, root: @dir, host_os: host_os, host_arch: host_arch)
+                                 .run(target: 'ubuntu-24.04')
+    end
+    assert_equal '1.0', result.version
+    stamp = File.join(@dir, 'builds', 'ubuntu', '24.04', host_deb_arch, 'build-out.txt')
+    assert File.exist?(stamp)
+    assert File.exist?(File.join(@dir, 'builds', 'ubuntu', '24.04', host_deb_arch, Crossbuild::Distributor::STAMP_NAME))
+    refute File.exist?(File.join(@dir, 'builds', 'debian')),
+           'debian target must not receive artifacts when another target was requested'
+  end
+
+  def test_build_target_unknown_target_raises
+    m = write_manifest(<<~YAML)
+      name: app
+      matrix:
+        - build: #{host_platform}
+          steps: ['true']
+          artifacts: { from: build/bin, to: [debian-12] }
+    YAML
+    error = assert_raises(Crossbuild::Error) do
+      capturing_stdout do
+        Crossbuild::Builder.new(m, root: @dir, host_os: host_os, host_arch: host_arch).run(target: 'fedora-41')
+      end
+    end
+    assert_includes error.message, 'no matrix entry distributes to target "fedora-41"'
+  end
+
+  def test_build_target_foreign_host_raises
+    m = write_manifest(<<~YAML)
+      name: app
+      matrix:
+        - build: windows/amd64
+          steps: ['true']
+          artifacts: { from: build/bin, to: [windows-11.0] }
+    YAML
+    skip 'host is windows' if host_os == :windows
+
+    error = assert_raises(Crossbuild::Error) do
+      capturing_stdout do
+        Crossbuild::Builder.new(m, root: @dir, host_os: host_os, host_arch: host_arch).run(target: 'windows-11.0')
+      end
+    end
+    assert_includes error.message, 'cross-compilation is not supported'
+  end
+
   private
 
   def host_os

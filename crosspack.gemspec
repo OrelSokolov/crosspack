@@ -8,12 +8,12 @@ Gem::Specification.new do |spec|
   spec.authors = ['Oleg Orlov']
   spec.email = ['orelcokolov@gmail.com']
 
-  spec.summary = 'Cross-platform build orchestrator and native package builder (deb/rpm/PKGBUILD/winget/cask)'
-  spec.description = 'Two cooperating commands: crossbuild runs the build steps of a project ' \
-                     'from a build.yaml matrix and fans the produced artifacts out into the ' \
-                     'per-target builds/ tree; crosspack turns that tree into native packages, ' \
-                     'driven by a cross-distro deps.yaml. Both share the same target vocabulary ' \
-                     'so the trees never drift apart.'
+  spec.summary = 'Staged cross-platform pipeline: deps → build → pack native packages (deb/rpm/PKGBUILD/winget/cask)'
+  spec.description = 'One command, one target vocabulary: crosspack deps <target> verifies and ' \
+                     'installs the build host dependencies, crosspack build <target> runs the ' \
+                     'build.yaml matrix entry and fans artifacts into builds/, crosspack pack ' \
+                     '<target> turns that tree into a native package. Stages are gated — no ' \
+                     'packing before building — and keyed by the same target strings throughout.'
   spec.homepage = 'https://github.com/OrelSokolov/crosspack'
   spec.license = 'Nonstandard'
 
@@ -24,8 +24,8 @@ Gem::Specification.new do |spec|
 
   spec.required_ruby_version = '>= 3.2.0'
 
-  spec.files = Dir['lib/**/*.rb'] + ['exe/crosspack', 'exe/crossbuild', 'README.md', 'CHANGELOG.md', 'LICENSE']
+  spec.files = Dir['lib/**/*.rb'] + ['exe/crosspack', 'README.md', 'CHANGELOG.md', 'LICENSE']
   spec.bindir = 'exe'
-  spec.executables = ['crosspack', 'crossbuild']
+  spec.executables = ['crosspack']
   spec.require_paths = ['lib']
 end

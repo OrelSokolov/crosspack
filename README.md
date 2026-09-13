@@ -1,31 +1,48 @@
 # crosspack
 
 Cross-platform build **and** pack toolchain for Wails-style desktop apps,
-shipped as one gem with two cooperating commands:
-
-- **`crossbuild`** — runs the build steps of a project from a small
-  `build.yaml` matrix and fans the produced artifacts out into the
-  per-target tree `builds/<family>[/<version>]/<arch>/`.
-- **`crosspack`** — turns that compiled tree into native packages
-  (deb / rpm / PKGBUILD / WiX / app bundle) for any target
-  distro × version × arch, driven by two small manifests.
-
-The two commands share the same target vocabulary (`Crosspack::Target`),
-so the build tree and the pack tree never drift apart. Build and pack
-stay cleanly separated: `crossbuild` never packages, `crosspack` never
-compiles — feed the output of one straight into the other:
+shipped as one gem with one command and a staged pipeline:
 
 ```
-crossbuild build                          # builds/ tree
-crosspack pack --target debian-12 --version 2026.08.31-33837
+crosspack deps <target>     # verify/install the build host's dependencies
+crosspack build <target>    # compile the target's matrix entry into builds/
+crosspack pack <target>     # package builds/<target> as a native package
 ```
 
-## crossbuild: build.yaml
+Every stage is keyed by the same target vocabulary — `debian-12`,
+`ubuntu-24.04`, `fedora-41`, `arch`, `macos`, `windows-11.0` — and gated by
+the previous one: `build` refuses to start before the deps stage passes, and
+`pack` refuses to run before `build` filled `builds/<target>/`. The build
+stage also stamps the version into the tree, so `pack` normally needs no
+`--version`:
+
+```
+crosspack deps ubuntu-24.04
+crosspack build ubuntu-24.04
+crosspack pack ubuntu-24.04
+```
+
+## build.yaml — what and where to build
 
 ```yaml
 name: myapp
 version: calver            # calver | git-tag | env:VAR | any literal string
 output: builds             # default builds; mirrors package.yaml `sources`
+
+deps:                      # build dependencies, per-host verify/install
+  imagemagick:
+    hosts:                 # first selector matching this host wins
+      ubuntu:
+        verify: dpkg -s imagemagick
+        install: sudo apt-get install -y imagemagick
+      darwin:
+        verify: magick -version
+        install: brew install imagemagick
+      windows:
+        verify: where magick
+        install: winget install -e --id ImageMagick.ImageMagick
+      "*":                 # any command — package manager or a project script
+        install: ./scripts/install-imagemagick.sh
 
 matrix:
   - build: linux/amd64     # os/arch this entry builds on (arch may be "any")
@@ -63,6 +80,19 @@ builds/ubuntu/24.04/amd64/myapp -> build/bin/myapp   (symlink)
 builds/windows/11.0/x86_64/myapp.exe
 ```
 
+### Build dependencies (deps:)
+
+`deps:` is the host axis to `deps.yaml`'s target axis: deps.yaml declares
+what a *package* needs at runtime; `deps:` declares what the *build host*
+must have. Checks differ per system, so every host rule carries its own
+commands: `verify` (presence probe; exit 0 = present; without it the name is
+looked up in PATH) and `install` (how to install it; may be omitted for
+verify-only rules). Selectors are tried in order: distro id from
+`/etc/os-release` (`ubuntu`), then `ID_LIKE` tokens (`debian`), then the os
+(`linux`, `darwin`, `windows`), then `"*"`. The deps stage runs verify →
+install → re-verify for every dependency; a dependency that is still missing
+fails the stage. Commands support the `{{name}}`/`{{os}}`/... placeholders.
+
 ### Version schemes
 
 | scheme        | value                                                      |
@@ -72,22 +102,9 @@ builds/windows/11.0/x86_64/myapp.exe
 | `env:VAR`     | taken from `VAR`; build fails loudly when unset            |
 | other string  | used verbatim, e.g. `version: 1.2.3`                       |
 
-### crossbuild CLI
+## package.yaml + deps.yaml — what and how to pack
 
-```
-crossbuild validate                       # build.yaml against the schema
-crossbuild matrix                         # entries × host buildability table
-crossbuild version                        # computed version
-crossbuild build [--target linux/amd64]   # all host-buildable entries, or one
-crossbuild targets                        # what is in builds/ ready to pack
-```
-
-`build` refuses invalid manifests with path-pointing errors, runs only the
-entries whose `build:` platform matches the host, then distributes.
-
-## crosspack: two manifests
-
-**`package.yaml`** — what and how to pack:
+**`package.yaml`**:
 
 ```yaml
 name: myapp
@@ -99,9 +116,9 @@ description: |-
 license: Proprietary       # optional, default Proprietary
 section: utils             # optional, deb only
 
-sources: builds             # compiled artifacts tree written by crossbuild:
-                            # builds/<family>/<version>/<arch>/ — pack without
-                            # a matching build directory fails honestly
+sources: builds             # compiled artifacts tree written by the build
+                            # stage: builds/<family>/<version>/<arch>/ —
+                            # pack without a matching build dir fails honestly
 prefix: usr/local          # install prefix inside the package
 lib_dir: lib/myapp       # optional, default lib/<name>
 
@@ -124,9 +141,13 @@ icon: build/appicon.png    # optional, -> <prefix>/share/pixmaps/<name>.png
 ```
 
 **`deps.yaml`** — canonical dependency names resolved to concrete packages
-per distro family/version (see the file itself for the full schema):
+per distro family/version. An optional top-level `version:` declares the
+schema version; a deps.yaml written for a newer crosspack is rejected with
+an upgrade hint:
 
 ```yaml
+version: 1                  # optional, currently 1
+
 webkit2gtk:
   targets:
     debian:
@@ -136,17 +157,24 @@ webkit2gtk:
     windows: system    # preinstalled (WebView2)
 ```
 
-Both files are validated against embedded schemas with actionable,
-path-pointing error messages; every builder refuses to run on an invalid
+All three files are validated against embedded schemas with actionable,
+path-pointing error messages; every stage refuses to run on an invalid
 manifest.
 
 ## CLI
 
 ```
-crosspack validate                       # both package.yaml and deps.yaml
-crosspack resolve --target debian-12     # Depends line for the target
-crosspack matrix                         # dependency x target table
-crosspack pack --target debian-12 --version 2026.08.31-1234 [--root .]
+# staged pipeline
+crosspack deps <target> [--check]        # verify/install build deps (--check: report only)
+crosspack build <target>|--all [--no-deps] [--version X]
+crosspack pack <target> [--version X]    # version defaults to the build stamp
+
+# inspection
+crosspack validate                       # package.yaml, deps.yaml and build.yaml
+crosspack resolve <target>               # Depends line for the target
+crosspack matrix                         # deps x target + build matrix tables
+crosspack version                        # computed build version
+crosspack targets                        # what is in builds/ ready to pack
 ```
 
 `pack` picks the builder from the target and writes to
@@ -164,20 +192,21 @@ crosspacks/arch/x86_64/PKGBUILD
 require 'crosspack'   # pulls in Crossbuild too
 
 Crossbuild.build('build.yaml', root: Dir.pwd)            # all host entries
-Crossbuild.build('build.yaml', entry_id: 'windows')      # one entry explicitly
+Crossbuild.build('build.yaml', target: 'ubuntu-24.04')   # the stages' build, library-level
 
 Crosspack.pack(
   manifest: 'package.yaml', deps: 'deps.yaml',
   target: Crosspack::Target.parse('debian-12', arch: 'amd64'),
-  version: '2026.08.31-1234',
+  version: nil,        # nil -> the version stamped by the build stage
   root: Dir.pwd, output_base: 'crosspacks'
 )
 ```
 
 Lower-level pieces are public too: on the build side `Crossbuild::
 BuildManifest`, `VersionScheme`, `Runner`, `Distributor`, `Matrix`,
-`Builder`, `Platform`; on the pack side `Crosspack::PackageManifest`,
-`Manifest`, `Resolver`, `Matrix`, `Target`, `Builders::*`.
+`Builder`, `DepInstaller`, `Platform`; on the pack side `Crosspack::
+PackageManifest`, `Manifest`, `Resolver`, `Matrix`, `Target`, `Builds`,
+`Builders::*`.
 
 Deb needs `dpkg-deb` (present on any Debian/Ubuntu), rpm needs
 `rpmbuild` (`sudo apt install rpm`), PKGBUILD generation needs nothing.

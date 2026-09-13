@@ -8,12 +8,13 @@ module Crossbuild
 
     attr_reader :manifest
 
-    def initialize(manifest, root: Dir.pwd, output_base: nil, version: nil,
+    def initialize(manifest, root: Dir.pwd, output_base: nil, version: nil, deps: true,
                    host_os: Platform.os, host_arch: Platform.arch)
       @manifest = manifest
       @root = root
       @output_base = output_base || manifest.output
       @version_override = version
+      @deps = deps
       @host_os = host_os
       @host_arch = host_arch
     end
@@ -21,19 +22,43 @@ module Crossbuild
     # entry_id: nil — every entry buildable on this host; otherwise the exact
     # entry id (which must exist, but may target another host — the user
     # asked for it explicitly).
-    def run(entry_id: nil)
+    # target: a raw target string (e.g. "ubuntu-24.04") — builds the single
+    # matrix entry distributing to it and fans artifacts out to that target
+    # only; the entry must be buildable on this host (no cross-compilation).
+    def run(entry_id: nil, target: nil)
       manifest.validate!
+      ensure_deps
       version = @version_override || VersionScheme.new(manifest.version).compute(root: @root)
-      entries = select_entries(entry_id)
+      entries = target ? entries_for_target(target) : select_entries(entry_id)
 
       entries.each do |entry|
         puts "\n==> #{manifest.name} [#{entry.id}] version #{version}"
-        run_entry(entry, version)
+        run_entry(entry, version, only: target)
       end
       Result.new(version: version, entries: entries)
     end
 
     private
+
+    # deps: false (--no-deps) skips the pre-build check/install pass.
+    def ensure_deps
+      return if !@deps || manifest.deps.empty?
+
+      puts '⧗ build deps'
+      DepInstaller.new(manifest, root: @root).ensure_all
+    end
+
+    def entries_for_target(raw)
+      entry = manifest.entry_for_target(raw)
+      host = "#{@host_os}/#{Platform.display_arch(@host_arch)}"
+      unless entry.buildable_on?(@host_os, @host_arch)
+        raise Error,
+              "the entry for #{raw.inspect} (#{entry.id}) builds on #{entry.platform}, " \
+              "this host is #{host} — cross-compilation is not supported"
+      end
+
+      [entry]
+    end
 
     def select_entries(entry_id)
       if entry_id
@@ -50,7 +75,7 @@ module Crossbuild
       end
     end
 
-    def run_entry(entry, version)
+    def run_entry(entry, version, only: nil)
       arch = entry.arch == :any ? @host_arch : entry.arch
       vars = {
         name: manifest.name,
@@ -63,7 +88,8 @@ module Crossbuild
 
       Runner.new(root: @root, vars: vars, env: entry.env).run(entry.steps) unless entry.steps.empty?
 
-      dirs = Distributor.new(root: @root, output_base: @output_base).distribute(entry, host_arch: @host_arch)
+      dirs = Distributor.new(root: @root, output_base: @output_base)
+                       .distribute(entry, host_arch: @host_arch, version: version, only: only)
       return if dirs.empty?
 
       dirs.each { |d| puts "🌳 #{d.sub("#{@root}/", '')}" }

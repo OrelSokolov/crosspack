@@ -200,4 +200,120 @@ class BuildManifestTest < Minitest::Test
     assert_equal ['darwin/amd64'], m.buildable_entries(:darwin, :x86_64).map(&:id)
     assert_equal ['darwin/amd64'], m.buildable_entries(:darwin, :arm64).map(&:id)
   end
+
+  def test_deps_section_parses_into_dependencies
+    m = load_manifest(<<~YAML)
+      name: app
+      deps:
+        imagemagick:
+          hosts:
+            ubuntu:
+              verify: dpkg -s imagemagick
+              install: sudo apt-get install -y imagemagick
+            windows:
+              verify: where magick
+              install: winget install -e --id ImageMagick.ImageMagick
+            "*":
+              install: ./scripts/install-imagemagick.sh
+      matrix:
+        - build: linux/amd64
+          steps: ['true']
+    YAML
+    assert m.valid?, m.errors.map(&:to_s).join('; ')
+    assert_equal 1, m.deps.size
+    dep = m.deps.first
+    assert_equal 'imagemagick', dep.name
+    assert_equal 'dpkg -s imagemagick', dep.hosts['ubuntu']['verify']
+    assert_equal 'sudo apt-get install -y imagemagick', dep.hosts['ubuntu']['install']
+    assert_nil dep.hosts['*']['verify']
+    assert_equal './scripts/install-imagemagick.sh', dep.hosts['*']['install']
+  end
+
+  def test_deps_verify_only_rule_is_valid
+    m = load_manifest("name: app\ndeps:\n  curl:\n    hosts:\n      \"*\": {verify: curl --version}\nmatrix:\n  - build: linux/amd64\n    steps: ['true']\n")
+    assert m.valid?
+    assert_nil m.deps.first.hosts['*']['install']
+  end
+
+  def test_deps_must_be_mapping
+    m = load_manifest("name: app\ndeps: [imagemagick]\nmatrix:\n  - build: linux/amd64\n    steps: ['true']\n")
+    refute m.valid?
+    assert(m.errors.any? { |e| e.path == 'deps' && e.message.include?('must be a mapping') })
+  end
+
+  def test_deps_unknown_key_rejected
+    m = load_manifest("name: app\ndeps:\n  curl:\n    check: curl --version\n    hosts:\n      \"*\": {install: apt-get install curl}\nmatrix:\n  - build: linux/amd64\n    steps: ['true']\n")
+    refute m.valid?
+    assert(m.errors.any? { |e| e.path == 'deps.curl.check' && e.message.include?('unknown key') })
+  end
+
+  def test_deps_rule_must_be_verify_install_mapping
+    m = load_manifest("name: app\ndeps:\n  curl:\n    hosts:\n      ubuntu: sudo apt-get install curl\nmatrix:\n  - build: linux/amd64\n    steps: ['true']\n")
+    refute m.valid?
+    assert(m.errors.any? { |e| e.path == 'deps.curl.hosts.ubuntu' && e.message.include?('verify and/or install') })
+  end
+
+  def test_deps_hosts_must_be_non_empty_mapping
+    m = load_manifest("name: app\ndeps:\n  curl:\n    hosts: {}\nmatrix:\n  - build: linux/amd64\n    steps: ['true']\n")
+    refute m.valid?
+    assert(m.errors.any? { |e| e.path == 'deps.curl.hosts' })
+  end
+
+  def test_deps_unknown_rule_key_rejected
+    m = load_manifest("name: app\ndeps:\n  curl:\n    hosts:\n      \"*\": {probe: curl --version, install: apt-get install curl}\nmatrix:\n  - build: linux/amd64\n    steps: ['true']\n")
+    refute m.valid?
+    assert(m.errors.any? { |e| e.path == 'deps.curl.hosts.*.probe' && e.message.include?('unknown key') })
+  end
+
+  def test_deps_command_must_be_string
+    m = load_manifest("name: app\ndeps:\n  curl:\n    hosts:\n      \"*\": {install: 42}\nmatrix:\n  - build: linux/amd64\n    steps: ['true']\n")
+    refute m.valid?
+    assert(m.errors.any? { |e| e.path == 'deps.curl.hosts.*.install' })
+  end
+
+  def test_deps_invalid_name_rejected
+    m = load_manifest("name: app\ndeps:\n  bad name!:\n    hosts:\n      \"*\": {install: 'true'}\nmatrix:\n  - build: linux/amd64\n    steps: ['true']\n")
+    refute m.valid?
+    assert(m.errors.any? { |e| e.path == 'deps.bad name!' })
+  end
+
+  def test_entry_for_target_finds_the_entry
+    m = load_manifest(<<~YAML)
+      name: app
+      matrix:
+        - build: linux/amd64
+          steps: ['true']
+          artifacts: { from: build/bin, to: [debian-12, ubuntu-24.04] }
+        - build: windows/amd64
+          steps: ['true']
+          artifacts: { from: build/bin, to: [windows-11.0] }
+    YAML
+    assert_equal 'linux/amd64', m.entry_for_target('ubuntu-24.04').id
+    assert_equal 'windows/amd64', m.entry_for_target('windows-11.0').id
+  end
+
+  def test_entry_for_target_unknown_raises_with_declared
+    m = load_manifest("name: app\nmatrix:\n  - build: linux/amd64\n    steps: ['true']\n    artifacts: { from: build/bin, to: [debian-12] }\n")
+    error = assert_raises(Crossbuild::Error) { m.entry_for_target('fedora-41') }
+    assert_includes error.message, 'no matrix entry distributes to target "fedora-41"'
+    assert_includes error.message, 'declared targets: debian-12'
+  end
+
+  def test_entry_for_target_ambiguous_raises
+    m = load_manifest(<<~YAML)
+      name: app
+      matrix:
+        - id: a
+          build: linux/amd64
+          steps: ['true']
+          artifacts: { from: build/bin, to: [debian-12] }
+        - id: b
+          build: linux/amd64
+          steps: ['true']
+          artifacts: { from: build/bin, to: [debian-12] }
+    YAML
+    error = assert_raises(Crossbuild::Error) { m.entry_for_target('debian-12') }
+    assert_includes error.message, 'several entries'
+    assert_includes error.message, 'a, b'
+  end
 end

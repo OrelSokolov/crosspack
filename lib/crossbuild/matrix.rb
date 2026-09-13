@@ -4,10 +4,12 @@ module Crossbuild
   # Human-readable build matrix: which entries exist, which can run on this
   # host, what they run and where their artifacts land.
   class Matrix
-    def initialize(manifest, host_os: Platform.os, host_arch: Platform.arch)
+    def initialize(manifest, host_os: Platform.os, host_arch: Platform.arch,
+                   selectors: Platform.selectors)
       @manifest = manifest
       @host_os = host_os
       @host_arch = host_arch
+      @selectors = selectors
     end
 
     def render
@@ -20,6 +22,7 @@ module Crossbuild
                else
                  "\n#{buildable.size} of #{@manifest.entries.size} entries build here: #{buildable.map(&:id).join(', ')}"
                end
+      lines << render_deps
       lines.join("\n")
     end
 
@@ -47,6 +50,30 @@ module Crossbuild
       from = entry.artifacts.from
       to = entry.artifacts.to.join(', ')
       "#{from} -> #{to}"
+    end
+
+    # How each deps: entry resolves on this host's selector list.
+    def render_deps
+      return '' if @manifest.deps.empty?
+
+      lines = ["\ndeps on this host (#{join_selectors}):"]
+      @manifest.deps.each do |dep|
+        selector = @selectors.find { |s| dep.hosts.key?(s) }
+        lines << if selector
+                   "  ⚙ #{dep.name.ljust(18)} #{selector} -> #{rule_note(dep.hosts[selector])}"
+                 else
+                   "  ✗ #{dep.name.ljust(18)} no rule for this host (described: #{dep.hosts.keys.join(', ')})"
+                 end
+      end
+      lines.join("\n")
+    end
+
+    def rule_note(rule)
+      rule['install'] || "(verify only: #{rule['verify']})"
+    end
+
+    def join_selectors
+      @selectors.join(' > ')
     end
   end
 end

@@ -103,10 +103,39 @@ class PackerTest < Minitest::Test
 
   def test_pack_missing_build_dir_gives_actionable_error
     error = assert_raises(Crosspack::BuildError) { pack('debian-13') }
-    assert_includes error.message, 'No compiled artifacts for target debian-13'
+    assert_includes error.message, 'Build stage not done for target debian-13'
     assert_includes error.message, 'builds/debian/13/amd64'
-    assert_includes error.message, 'available builds'
-    assert_includes error.message, 'debian-12'
+    assert_includes error.message, 'crosspack build debian-13'
+  end
+
+  def test_pack_version_defaults_to_build_stamp
+    stamp = File.join(@root, 'builds', 'debian', '12', 'amd64', Crossbuild::Distributor::STAMP_NAME)
+    File.write(stamp, "7.7.7\n")
+    path = Crosspack.pack(
+      manifest: File.join(@root, 'package.yaml'),
+      deps: File.join(@root, 'deps.yaml'),
+      target: Crosspack::Target.parse('debian-12'),
+      version: nil,
+      root: @root,
+      output_base: File.join(@root, 'crosspacks')
+    )
+    assert_includes File.basename(path), '7.7.7'
+  end
+
+  def test_pack_without_version_and_stamp_raises_stage_hint
+    error = assert_raises(Crosspack::BuildError) do
+      Crosspack.pack(
+        manifest: File.join(@root, 'package.yaml'),
+        deps: File.join(@root, 'deps.yaml'),
+        target: Crosspack::Target.parse('arch'),
+        version: nil,
+        root: @root,
+        output_base: File.join(@root, 'crosspacks')
+      )
+    end
+    assert_includes error.message, 'no build stamp'
+    assert_includes error.message, 'crosspack build arch'
+    assert_includes error.message, '--version'
   end
 
   def test_builds_available_scans_mirrored_tree

@@ -33,9 +33,15 @@ module Crosspack
 
   # Parses and validates deps.yaml. Root keys are canonical dependency
   # names; each maps to { targets: { family: { "version": [pkgs] } } } or a
-  # scalar verdict for a whole family.
+  # scalar verdict for a whole family. A reserved top-level `version:` key
+  # declares the schema version (see SCHEMA_VERSION).
   class Manifest
-    attr_reader :path, :deps, :errors, :warnings
+    # The deps.yaml schema version this crosspack understands. Files
+    # declaring a newer version are rejected at load time with an upgrade
+    # hint; older (or absent) versions are accepted.
+    SCHEMA_VERSION = 1
+
+    attr_reader :path, :deps, :schema_version, :errors, :warnings
 
     def self.load(path)
       unless File.file?(path)
@@ -54,10 +60,12 @@ module Crosspack
 
     def initialize(path, raw)
       @path = path
-      @deps = raw.is_a?(Hash) ? raw : {}
-      @raw = raw
+      @schema_version = raw.is_a?(Hash) ? raw['version'] : nil
       @errors = []
       @warnings = []
+      check_schema_version!
+      @deps = raw.is_a?(Hash) ? raw.reject { |key, _| key == 'version' } : {}
+      @raw = raw
       validate
     end
 
@@ -90,6 +98,26 @@ module Crosspack
 
     private
 
+    # A schema version newer than this crosspack supports is a hard, loud
+    # error at load time — every command (resolve, matrix, pack) reports it,
+    # not just validate. Malformed versions (not an integer >= 1) are
+    # ordinary schema errors.
+    def check_schema_version!
+      v = @schema_version
+      return if v.nil?
+
+      unless v.is_a?(Integer) && v >= 1
+        @errors << Issue.new('version', "schema version must be an integer >= 1, got #{v.inspect}")
+        return
+      end
+      return if v <= SCHEMA_VERSION
+
+      raise InvalidManifestError,
+            "#{@path}: deps.yaml declares schema version #{v}, " \
+            "but this crosspack (#{Crosspack::VERSION}) supports up to #{SCHEMA_VERSION}. " \
+            'Update the gem (gem update crosspack) or lower the declared version.'
+    end
+
     def validate
       unless @raw.is_a?(Hash) && !@raw.empty?
         @errors << Issue.new(
@@ -98,7 +126,7 @@ module Crosspack
         )
         return
       end
-      @raw.each { |name, body| validate_dep(name.to_s, body) }
+      @raw.each { |name, body| validate_dep(name.to_s, body) unless name == 'version' }
     end
 
     def validate_dep(name, body)
