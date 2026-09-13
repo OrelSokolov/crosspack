@@ -48,6 +48,8 @@ parser = OptionParser.new do |opts|
                 "Stages:   deps [<target>] [--check]      verify/install build deps (default: this host)\n" \
                 "          build [<target>]|--all          compile into builds/ (default: this host)\n" \
                 "          pack [<target>] [--version X]   package builds/<target> (default: this host; version from the build stamp)\n" \
+                "Host:     run [-- <app args>]            build for this host, then launch the main binary\n" \
+                "          install                         launch this host's package with its installer\n" \
                 'Commands: validate, resolve, matrix, version, targets'
 
   opts.on('-f', '--file PATH', 'path to crosspack.yml (default: ./crosspack.yml)') { |v| options[:file] = v }
@@ -126,7 +128,11 @@ when 'validate'
   puts colorized_report(deps_manifest.error_report)
   puts colorized_report(pkg.error_report)
   puts colorized_report(build_manifest.error_report)
-  ok = config.valid? && deps_manifest.valid? && pkg.valid? && build_manifest.valid?
+  [config.run_manifest, config.install_manifest].each do |m|
+    puts colorized_report(m.error_report) if m.present?
+  end
+  ok = config.valid? && deps_manifest.valid? && pkg.valid? && build_manifest.valid? &&
+       config.run_manifest.valid? && config.install_manifest.valid?
   exit(ok ? 0 : 1)
 when 'matrix'
   deps_manifest = config.deps_manifest
@@ -217,6 +223,32 @@ when 'pack'
     abort_with e.message
   end
   puts Crosspack::Colors.green("📦 #{path}")
+when 'run', 'install'
+  # Host-only commands: no target argument; anything after `--` goes to the
+  # launched process (crosspack run -- --dev).
+  if positional
+    abort_with "crosspack #{command} works only for the current host — no target argument " \
+               "(other targets make no sense here)"
+  end
+  args = ARGV.dup
+  args.shift if args.first == '--'
+  begin
+    status =
+      if command == 'run'
+        Crosspack::Launcher.run(
+          config, root: options[:root], args: args,
+          output_base: options[:output_base], version: options[:version], deps: !options[:no_deps]
+        )
+      else
+        Crosspack::Launcher.install(
+          config, root: options[:root], args: args,
+          output_base: options[:output_base] || 'crosspacks'
+        )
+      end
+  rescue Crosspack::InvalidManifestError, Crosspack::BuildError, Crossbuild::Error => e
+    abort_with e.message
+  end
+  exit(status) unless status.zero?
 when 'targets'
   # What can actually be packed: builds tree + resolvable deps per target.
   pkg = config.package_manifest
@@ -224,5 +256,5 @@ when 'targets'
   root = sources ? File.expand_path(sources, options[:root]) : File.join(options[:root], 'builds')
   puts Crosspack::Builds.report(root)
 else
-  abort_with "Unknown command #{command.inspect}. Available: deps, build, pack, validate, resolve, matrix, version, targets"
+  abort_with "Unknown command #{command.inspect}. Available: deps, build, pack, run, install, validate, resolve, matrix, version, targets"
 end

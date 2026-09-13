@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-09-13
+
+### Added
+- Host-only commands: `crosspack run` builds for the current host (the same
+  stage `crosspack build <host target>` runs) and then launches the main
+  binary straight from `builds/` — the first `package.executables` entry,
+  not the package. Arguments after `--` are passed to the app
+  (`crosspack run -- --dev`); the app's exit code is propagated.
+- `crosspack install` launches this host's package with its system
+  installer: the newest package in `crosspacks/<host target>/` goes to
+  `xdg-open` (deb/rpm), `msiexec /i` (MSI) or `open` (macOS dmg/.app);
+  for arch crosspack generates only a PKGBUILD, so it points at
+  `makepkg -si`.
+- crosspack.yml `run:` / `install:` sections: per-host launch-command
+  overrides using the same host selectors as `build.deps` (distro id,
+  ID_LIKE, os, `"*"`), with the `{{path}}` placeholder (the built binary
+  for run, the package file for install) plus the usual build facts.
+  Default without a `run:` section: execute the binary directly (a macOS
+  `.app` bundle is `open`ed).
+
+[0.7.0]: https://github.com/OrelSokolov/crosspack/releases/tag/v0.7.0
+
 ## [0.6.2] - 2026-09-13
 
 ### Added

@@ -136,6 +136,24 @@ class ConfigTest < Minitest::Test
     assert_equal config.path, Crosspack::Config.coerce('crosspack.yml', root: @tmpdir).path
   end
 
+  def test_run_and_install_sections_are_optional_and_validated
+    config = load(FULL)
+    refute config.run_manifest.present?
+    assert config.run_manifest.valid?
+    assert config.install_manifest.valid?
+
+    broken = load(FULL + "install:\n  hosts:\n    ubuntu: 42\n")
+    assert config.install_manifest.valid?
+    refute broken.install_manifest.valid?
+    assert_includes broken.install_manifest.error_report, 'install.hosts.ubuntu'
+  end
+
+  def test_run_section_of_wrong_type_is_error
+    config = load("name: app\nrun: [yes]\n")
+    refute config.valid?
+    assert(config.errors.any? { |e| e.path == 'run' && e.message.include?('mapping') })
+  end
+
   def test_load_default_path
     Dir.mktmpdir('crosspack-default') do |dir|
       Dir.chdir(dir) do

@@ -31,14 +31,15 @@ token):
 crosspack deps && crosspack build && crosspack pack
 ```
 
-## crosspack.yml — one file, three sections
+## crosspack.yml — one file, three sections + two host hooks
 
 The top level carries the shared facts — `name` (required once) and the
 optional `version` scheme — and three sections: `build:` (what and where to
 build), `package:` (what and how to pack) and `deps:` (runtime dependencies
-resolved to concrete packages per distro). The shared name/version feed the
-build section, the name feeds the package section; each section keeps its
-own schema.
+resolved to concrete packages per distro). Two optional hooks — `run:` and
+`install:` — override the host-only launch commands. The shared name/version
+feed the build section, the name feeds the package section; each section
+keeps its own schema.
 
 ```yaml
 name: myapp
@@ -142,6 +143,15 @@ deps:
       fedora: { "*": [webkit2gtk4.1] }
       macos: system      # OS component
       windows: system    # preinstalled (WebView2)
+
+# host-only launch hooks (optional): same host selectors as build.deps
+run:                       # `crosspack run`: how to launch the built binary
+  hosts:
+    darwin: open build/bin/MyApp.app     # .app bundles must be opened, not exec'd
+
+install:                   # `crosspack install`: how to launch this host's package
+  hosts:
+    ubuntu: sudo apt-get install -y "{{path}}"
 ```
 
 Placeholders `{{version}}`, `{{name}}`, `{{platform}}`, `{{os}}`, `{{arch}}`
@@ -192,6 +202,10 @@ crosspack deps <target> [--check]        # verify/install build deps (--check: r
 crosspack build <target>|--all [--no-deps] [--version X]
 crosspack pack <target> [--version X]    # version defaults to the build stamp
 
+# host-only: this machine, no target argument
+crosspack run [-- --dev]                 # build for this host, then launch the main binary
+crosspack install                        # launch this host's package with its installer
+
 # inspection
 crosspack validate                       # crosspack.yml: top level + all sections
 crosspack resolve <target>               # Depends line for the target
@@ -211,6 +225,32 @@ crosspacks/ubuntu/26.04/amd64/myapp_2026.08.31-1234_amd64.deb
 crosspacks/fedora/41/x86_64/myapp-2026.08.31-1234.x86_64.rpm   (needs rpmbuild)
 crosspacks/arch/x86_64/PKGBUILD
 ```
+
+### Host-only commands: run and install
+
+`run` and `install` apply to the current host only — the build target *is*
+the run target, so they take no target argument. `crosspack run` runs the
+build stage for this host (same as `crosspack build <host target>`), then
+launches the first `package.executables` binary straight from `builds/` —
+the binary, not the package. Everything after `--` goes to the app:
+
+```
+crosspack run -- --dev
+```
+
+`crosspack install` takes the newest package packed for this host in
+`crosspacks/` and hands it to the system installer. Defaults: `xdg-open`
+for deb/rpm (opens GNOME Software/installer), `msiexec /i` for the MSI,
+`open` for a macOS dmg/.app; for arch crosspack only generates a PKGBUILD,
+so it points you at `makepkg -si` instead.
+
+Both are per-system by nature, so each accepts a `hosts:` override with the
+same selectors as `build.deps` (distro id, `ID_LIKE`, os, `"*"` — first
+match wins). Commands support the `{{path}}` placeholder (the binary in
+`builds/` for run, the package file for install) plus the usual
+`{{name}}`/`{{version}}`/`{{os}}`/`{{arch}}` facts; quote values that start
+with `{{` (YAML flow indicators). Without a `run:` section the binary is
+executed directly, except a macOS `.app` bundle which is `open`ed.
 
 ## Library
 

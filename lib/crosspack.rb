@@ -1,15 +1,24 @@
 # frozen_string_literal: true
 
 require_relative 'crosspack/version'
+
+module Crosspack
+  # A stage failed (deps/build/pack/launch). Defined before the requires:
+  # launcher.rb subclasses it at load time.
+  class BuildError < StandardError; end
+end
+
 require_relative 'crosspack/colors'
 require_relative 'crosspack/target'
 require_relative 'crosspack/manifest'
+require_relative 'crosspack/command_manifest'
 require_relative 'crosspack/package_manifest'
 require_relative 'crosspack/config'
 require_relative 'crosspack/resolver'
 require_relative 'crosspack/matrix'
 require_relative 'crosspack/builds'
 require_relative 'crosspack/packer'
+require_relative 'crosspack/launcher'
 require_relative 'crosspack/builders/deb'
 require_relative 'crosspack/builders/rpm'
 require_relative 'crosspack/builders/pkgbuild'
@@ -30,7 +39,6 @@ module Crosspack
   #   files:       { source_path => destination_inside_package (no leading /) }
   #   symlinks:    { link_path_inside_package => link_target }
   #   executables: [destination paths to chmod 0755]
-  class BuildError < StandardError; end
 
   # Convenience wrapper: Crosspack.pack(config: 'crosspack.yml',
   # target: Target.parse('debian-12'), version: '1.0-1')

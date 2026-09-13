@@ -15,7 +15,7 @@ module Crosspack
   # happens per section, not per file.
   class Config
     DEFAULT_PATH = 'crosspack.yml'
-    TOP_LEVEL_KEYS = %w[name version build package deps].freeze
+    TOP_LEVEL_KEYS = %w[name version build package deps run install].freeze
     NAME_RE = /\A[a-z0-9][a-z0-9+._-]*\z/i.freeze
 
     attr_reader :path, :errors, :warnings
@@ -81,6 +81,15 @@ module Crosspack
       @deps_manifest ||= Manifest.new(@path, deps_section)
     end
 
+    # The optional run:/install: sections (host-only launch commands).
+    def run_manifest
+      @run_manifest ||= CommandManifest.new(@path, @raw['run'], 'run')
+    end
+
+    def install_manifest
+      @install_manifest ||= CommandManifest.new(@path, @raw['install'], 'install')
+    end
+
     private
 
     def validate
@@ -124,7 +133,7 @@ module Crosspack
     end
 
     def check_section_types
-      %w[build package deps].each do |key|
+      %w[build package deps run install].each do |key|
         next unless @raw.key?(key) && !@raw[key].is_a?(Hash)
 
         @errors << Issue.new(key, 'must be a mapping')
