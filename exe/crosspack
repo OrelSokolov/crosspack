@@ -12,8 +12,24 @@ rescue LoadError
 end
 
 def abort_with(message)
-  warn message
+  warn Crosspack::Colors.red(message)
   exit 1
+end
+
+# Validate reports line by line: valid → green, invalid → red, warnings → yellow.
+def colorized_report(text)
+  text.lines.map do |line|
+    chomped = line.chomp
+    colored =
+      if chomped.include?('is invalid')
+        Crosspack::Colors.red(chomped)
+      elsif chomped.include?('is valid')
+        Crosspack::Colors.green(chomped)
+      elsif chomped.strip.start_with?('⚠')
+        Crosspack::Colors.yellow(chomped)
+      end
+    colored ? "#{colored}\n" : line
+  end.join
 end
 
 options = { file: Crosspack::Config::DEFAULT_PATH, arch: 'amd64',
@@ -106,10 +122,10 @@ when 'validate'
   deps_manifest = config.deps_manifest
   pkg = config.package_manifest
   build_manifest = config.build_manifest
-  puts config.error_report
-  puts deps_manifest.error_report
-  puts pkg.error_report
-  puts build_manifest.error_report
+  puts colorized_report(config.error_report)
+  puts colorized_report(deps_manifest.error_report)
+  puts colorized_report(pkg.error_report)
+  puts colorized_report(build_manifest.error_report)
   ok = config.valid? && deps_manifest.valid? && pkg.valid? && build_manifest.valid?
   exit(ok ? 0 : 1)
 when 'matrix'
@@ -166,7 +182,7 @@ when 'deps'
   rescue Crossbuild::Error => e
     abort_with e.message
   end
-  puts "deps ready:\n#{installer.report}"
+  puts Crosspack::Colors.green("deps ready:\n#{installer.report}")
 when 'build'
   build_manifest = config.build_manifest
   abort_with 'the build: section is invalid — run: crosspack validate' unless build_manifest.valid?
@@ -182,7 +198,7 @@ when 'build'
   rescue Crossbuild::Error, Crosspack::InvalidManifestError => e
     abort_with e.message
   end
-  puts "\n📦 #{result.entries.size} entr#{result.entries.size == 1 ? 'y' : 'ies'} built, version #{result.version}"
+  puts Crosspack::Colors.green("\n📦 #{result.entries.size} entr#{result.entries.size == 1 ? 'y' : 'ies'} built, version #{result.version}")
   puts 'Pack with: crosspack pack <target>'
 when 'pack'
   target_str = positional || host_target!('pack')
@@ -200,7 +216,7 @@ when 'pack'
   rescue Crosspack::InvalidManifestError, Crosspack::ResolveError, Crosspack::BuildError => e
     abort_with e.message
   end
-  puts "📦 #{path}"
+  puts Crosspack::Colors.green("📦 #{path}")
 when 'targets'
   # What can actually be packed: builds tree + resolvable deps per target.
   pkg = config.package_manifest

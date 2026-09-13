@@ -53,8 +53,10 @@ module Crossbuild
       return '  (no deps declared)' if @manifest.deps.empty?
 
       (@statuses || check_all).map do |s|
+        state = format('%-8s', s.installed ? 'ok' : 'MISSING')
+        state = Crosspack::Colors.public_send(s.installed ? :green : :red, state)
         format('  %-20s %-8s %-8s %s',
-               s.dep, s.installed ? 'ok' : 'MISSING', s.selector, s.command)
+               s.dep, state, s.selector, s.command)
       end.join("\n")
     end
 

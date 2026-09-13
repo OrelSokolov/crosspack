@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   demanding an argument; `--version X` keeps overriding the build/pack
   version.
 
+## [Unreleased]
+
+### Added
+- Colored CLI output via the new `colorize` runtime dependency: success
+  messages green, errors red, validation warnings yellow (the `ok`/`MISSING`
+  statuses in the deps report included). Colors apply only to a TTY and
+  respect `NO_COLOR`, so piped and logged output stays plain.
+
 [0.6.1]: https://github.com/OrelSokolov/crosspack/releases/tag/v0.6.1
 
 ## [0.6.0] - 2026-09-13

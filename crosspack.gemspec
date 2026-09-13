@@ -24,8 +24,10 @@ Gem::Specification.new do |spec|
 
   spec.required_ruby_version = '>= 3.2.0'
 
-  spec.files = Dir['lib/**/*.rb'] + ['exe/crosspack', 'README.md', 'CHANGELOG.md', 'LICENSE']
+  spec.files = Dir['lib/**/*.rb'] + ['exe/crosspack', 'README.md', 'CHANGELOG.md', 'LICENSE', 'logo.png']
   spec.bindir = 'exe'
   spec.executables = ['crosspack']
   spec.require_paths = ['lib']
+
+  spec.add_dependency 'colorize', '~> 1.0'
 end

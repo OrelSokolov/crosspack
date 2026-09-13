@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'crosspack/version'
+require_relative 'crosspack/colors'
 require_relative 'crosspack/target'
 require_relative 'crosspack/manifest'
 require_relative 'crosspack/package_manifest'
