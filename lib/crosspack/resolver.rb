@@ -25,7 +25,7 @@ module Crosspack
   class ResolveError < StandardError; end
 
   # Turns (manifest, target) into concrete package dependencies. No network,
-  # no search: everything comes from deps.yaml.
+  # no search: everything comes from the deps: section of crosspack.yml.
   class Resolver
     def initialize(manifest)
       @manifest = manifest
@@ -41,7 +41,7 @@ module Crosspack
         if rule.nil?
           available = rules.keys.map(&:to_s).join(', ')
           raise ResolveError,
-                "#{name}: deps.yaml has no rules for family #{family} (target #{target}). " \
+                "#{name}: the deps: section has no rules for family #{family} (target #{target}). " \
                 "Add the section #{name}: targets: #{family}: ... — currently described: #{available}"
         end
 

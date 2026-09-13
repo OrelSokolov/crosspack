@@ -9,22 +9,38 @@ require 'tmpdir'
 require 'fileutils'
 require 'stringio'
 
+module ConfigHelper
+  # Writes a crosspack.yml with `top` (default: just the name) plus the
+  # given body indented under `key:` and loads it, so error messages carry
+  # a realistic path.
+  def load_config_section(key, body, top = "name: app\n")
+    dir = (@tmpdir ||= Dir.mktmpdir('crosspack-test'))
+    file = File.join(dir, 'crosspack.yml')
+    File.write(file, "#{top}#{key}:\n#{indent(body)}")
+    Crosspack::Config.load(file)
+  end
+
+  private
+
+  def indent(text)
+    text.lines.map { |l| l.strip.empty? ? "\n" : "  #{l}" }.join
+  end
+end
+
 module ManifestHelper
-  # Loads a deps.yaml from a heredoc string, writing it to a temp file so
-  # error messages carry a realistic path.
+  include ConfigHelper
+
+  # Loads a deps: section from a heredoc string.
   def load_manifest(yaml_text)
-    file = File.join(@tmpdir ||= Dir.mktmpdir('crosspack-test'), 'deps.yaml')
-    File.write(file, yaml_text)
-    Crosspack::Manifest.load(file)
+    load_config_section('deps', yaml_text).deps_manifest
   end
 end
 
 module BuildManifestHelper
-  # Loads a build.yaml from a heredoc string, writing it to a temp file so
-  # error messages carry a realistic path.
+  include ConfigHelper
+
+  # Loads a build: section from a heredoc string.
   def load_manifest(yaml_text)
-    file = File.join(@tmpdir ||= Dir.mktmpdir('crossbuild-test'), 'build.yaml')
-    File.write(file, yaml_text)
-    Crossbuild::BuildManifest.load(file)
+    load_config_section('build', yaml_text).build_manifest
   end
 end

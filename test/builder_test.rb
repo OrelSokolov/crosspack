@@ -3,7 +3,7 @@
 require_relative 'test_helper'
 
 class BuilderTest < Minitest::Test
-  include BuildManifestHelper
+  include ConfigHelper
 
   def setup
     @dir = Dir.mktmpdir('crossbuild-build')
@@ -14,9 +14,9 @@ class BuilderTest < Minitest::Test
   end
 
   def write_manifest(yaml)
-    file = File.join(@dir, 'build.yaml')
-    File.write(file, yaml)
-    Crossbuild::BuildManifest.load(file)
+    file = File.join(@dir, 'crosspack.yml')
+    File.write(file, "name: app\nbuild:\n#{indent(yaml)}")
+    Crosspack::Config.load(file).build_manifest
   end
 
   def test_end_to_end_steps_then_distribution

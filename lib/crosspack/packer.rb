@@ -4,22 +4,21 @@ require 'fileutils'
 require 'tmpdir'
 
 module Crosspack
-  # Single entry point: takes a compiled artifacts directory (per
-  # package.yaml), resolves dependencies for the target (per deps.yaml) and
-  # produces a native package under output_base/<family>/<version>/<arch>/.
-  # The builder is chosen by the target format — deb, rpm or PKGBUILD.
+  # Single entry point: takes a Config (the package: and deps: sections of
+  # crosspack.yml), resolves dependencies for the target and produces a
+  # native package under output_base/<family>/<version>/<arch>/. The builder
+  # is chosen by the target format — deb, rpm or PKGBUILD.
   # version: when omitted, the version stamped by `crosspack build <target>`
   # (.crosspack-build in the target's builds/ directory) is used.
   class Packer
-    def self.pack(manifest:, deps:, target:, version: nil, root: Dir.pwd,
+    def self.pack(config:, target:, version: nil, root: Dir.pwd,
                   output_base: 'crosspacks')
-      new(manifest: manifest, deps: deps, target: target, version: version,
+      new(config: config, target: target, version: version,
           root: root, output_base: output_base).pack
     end
 
-    def initialize(manifest:, deps:, target:, version:, root:, output_base:)
-      @pkg_path = manifest
-      @deps_path = deps
+    def initialize(config:, target:, version:, root:, output_base:)
+      @config = config
       @target = target
       @version = version && version.to_s
       @root = root
@@ -27,8 +26,9 @@ module Crosspack
     end
 
     def pack
-      @pkg = PackageManifest.load(@pkg_path)
-      @deps = Manifest.load(@deps_path)
+      @config = Config.coerce(@config, root: @root)
+      @pkg = @config.package_manifest
+      @deps = @config.deps_manifest
       validate_both!
       resolve_version!
       @pkg_data = build_layout
@@ -69,6 +69,7 @@ module Crosspack
 
     def validate_both!
       errors = []
+      errors << @config.error_report unless @config.valid?
       errors << @pkg.error_report unless @pkg.valid?
       errors << @deps.error_report unless @deps.valid?
       return if errors.empty?
@@ -95,7 +96,7 @@ module Crosspack
       end
 
       lib_dst = File.join(@pkg.prefix, @pkg.lib_dir)
-      files = @pkg.payload.to_h { |n| [File.join(src_dir, n), File.join(lib_dst, n)] }
+      files = @pkg.payload_for(@target).to_h { |n| [File.join(src_dir, n), File.join(lib_dst, n)] }
 
       if @pkg.icon
         icon_src = File.expand_path(@pkg.icon, @root)
@@ -109,7 +110,7 @@ module Crosspack
       end
 
       symlinks = @pkg.links.to_h { |link, target| [File.join(@pkg.prefix, link), target] }
-      executables = @pkg.executables.map { |exe| File.join(lib_dst, exe) }
+      executables = @pkg.executables_for(@target).map { |exe| File.join(lib_dst, exe) }
 
       { files: files, symlinks: symlinks, executables: executables,
         src_dir: src_dir, lib_dst: lib_dst }
@@ -191,7 +192,7 @@ module Crosspack
         depends: resolved_depends(:pkgbuild),
         arch: [@target.package_arch(:pkgbuild)],
         # PKGBUILD sources are archive-relative names, not local paths.
-        files: @pkg.payload.to_h { |n| [n, File.join(@pkg_data[:lib_dst], n)] },
+        files: @pkg.payload_for(@target).to_h { |n| [n, File.join(@pkg_data[:lib_dst], n)] },
         symlinks: @pkg_data[:symlinks],
         executables: @pkg_data[:executables],
         source: ["#{@pkg.name}-#{version}.tar.gz"],
@@ -212,7 +213,7 @@ module Crosspack
     def pack_windows
       output = File.join(@target.output_dir(@output_base, :winget),
                          "#{@pkg.name}-#{Builders::Wix.msi_version(@version)}.msi")
-      files = @pkg.payload.to_h { |n| [File.join(@pkg_data[:src_dir], n), n] }
+      files = @pkg.payload_for(@target).to_h { |n| [File.join(@pkg_data[:src_dir], n), n] }
       Builders::Wix.build(
         name: @pkg.name,
         version: @version,
@@ -227,13 +228,13 @@ module Crosspack
     # macOS: .app bundle staging; DMG itself requires a Mac (hdiutil).
     def pack_macos
       output_dir = @target.output_dir(@output_base, :cask)
-      files = @pkg.payload.to_h { |n| [File.join(@pkg_data[:src_dir], n), n] }
+      files = @pkg.payload_for(@target).to_h { |n| [File.join(@pkg_data[:src_dir], n), n] }
       Builders::AppDir.build(
         name: @pkg.name,
         version: @version,
         summary: @pkg.summary,
         files: files,
-        executables: @pkg.executables,
+        executables: @pkg.executables_for(@target),
         output: output_dir
       )
     end

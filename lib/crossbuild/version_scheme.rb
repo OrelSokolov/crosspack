@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 module Crossbuild
-  # Computes the build version from the `version:` field of build.yaml.
+  # Computes the build version from the top-level `version:` of
+  # crosspack.yml.
   # Supported specs:
   #   calver    — YYYY.MM.DD-<seconds since local midnight>, e.g. 2026.08.31-33837
   #   git-tag   — latest `git describe --tags --abbrev=0`, fallback 0.0.0-dev
@@ -43,7 +44,7 @@ module Crossbuild
 
     def env_version(var)
       value = ENV[var].to_s.strip
-      raise Error, "version env var #{var} is not set (version: env:#{var} in build.yaml)" if value.empty?
+      raise Error, "version env var #{var} is not set (version: env:#{var} at the top level of crosspack.yml)" if value.empty?
 
       value
     end

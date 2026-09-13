@@ -2,9 +2,10 @@
 
 module Crossbuild
   # Verifies and installs the build dependencies declared in the deps:
-  # section of build.yaml. Host selectors (distro id, ID_LIKE tokens, os,
-  # "*" — see Platform.selectors) are matched against each dependency's
-  # hosts: rules; the first hit wins. Every rule carries its own commands:
+  # rules of the build: section of crosspack.yml. Host selectors (distro
+  # id, ID_LIKE tokens, os, "*" — see Platform.selectors) are matched
+  # against each dependency's hosts: rules; the first hit wins. Every rule
+  # carries its own commands:
   # `verify` decides presence (exit 0 = installed; default: PATH lookup of
   # the dependency name), `install` says how to install it on that host.
   class DepInstaller

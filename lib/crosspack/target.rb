@@ -55,6 +55,45 @@ module Crosspack
       new(family_sym, version, norm_arch)
     end
 
+    # The target of the machine crosspack runs on, for stage commands invoked
+    # without an explicit target: "macos", "windows-11.0" or the distro
+    # family + version from the os-release file ("ubuntu-24.04",
+    # "debian-12", "fedora-41", "arch"). Unknown distro ids fall back to the
+    # first ID_LIKE token that names a family. Returns nil when the host is
+    # not recognizable — the CLI then asks for an explicit target.
+    # Windows defaults to the 11.0 target vocabulary (10 is EOL); pass a
+    # target explicitly when packing for another release.
+    def self.host_string(ruby_platform: RUBY_PLATFORM, release_path: '/etc/os-release')
+      case ruby_platform
+      when /darwin/ then 'macos'
+      when /mingw|mswin|cygwin/i then 'windows-11.0'
+      when /linux/
+        facts = host_os_release(release_path)
+        family = ([facts['ID']] + facts['ID_LIKE'].to_s.split)
+                   .filter_map { |id| id.to_s.to_sym if id }
+                   .find { |f| FAMILIES.include?(f) }
+        return nil if family.nil?
+
+        version = facts['VERSION_ID'].to_s
+        return family.to_s if VERSIONLESS_FAMILIES.include?(family) ||
+                               OPTIONAL_VERSION_FAMILIES.include?(family)
+        return nil if version.empty? # e.g. Debian sid: no pin-able version
+
+        "#{family}-#{version}"
+      end
+    end
+
+    def self.host_os_release(path)
+      File.read(path).each_line.with_object({}) do |line, facts|
+        key, value = line.split('=', 2)
+        next if value.nil?
+
+        facts[key.strip] = value.strip.delete_prefix('"').delete_suffix('"')
+      end
+    rescue Errno::ENOENT
+      {}
+    end
+
     def initialize(family, version = nil, arch = :x86_64)
       @family = family.to_sym
       @version = version && version.to_s

@@ -8,7 +8,8 @@ module Crosspack
   module Builders
     # Stages a buildroot and packs it with rpmbuild. The spec is generated
     # with AutoReqProv disabled so dependency names come exclusively from
-    # deps.yaml (resolved per target), never from ELF soname scanning.
+    # the deps: section of crosspack.yml (resolved per target), never from
+    # ELF soname scanning.
     class Rpm
       def self.build(name:, version:, release:, summary:, license:, requires:,
                      files:, symlinks: {}, executables: [], description: nil,

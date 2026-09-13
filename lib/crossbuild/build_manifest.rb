@@ -1,9 +1,8 @@
 # frozen_string_literal: true
 
-require 'yaml'
-
 module Crossbuild
-  # A single schema problem: full path into build.yaml + human explanation.
+  # A single schema problem: full path into the build: section + human
+  # explanation.
   class Issue
     attr_reader :path, :message
 
@@ -17,7 +16,7 @@ module Crossbuild
     end
   end
 
-  class InvalidManifestError < StandardError; end
+  class InvalidManifestError < Crosspack::InvalidManifestError; end
 
   class BuildManifest
     OS_LIST = %w[linux darwin windows].freeze
@@ -85,21 +84,6 @@ module Crossbuild
 
     attr_reader :path, :name, :version, :output, :deps, :entries, :errors, :warnings
 
-    def self.load(path)
-      unless File.file?(path)
-        raise InvalidManifestError,
-              "Build manifest not found: #{path}\n" \
-              'Create build.yaml next to the Rakefile (see crossbuild/README.md).'
-      end
-      begin
-        raw = YAML.safe_load(File.read(path), permitted_classes: [], aliases: false)
-      rescue Psych::SyntaxError => e
-        raise InvalidManifestError,
-              "#{path}: YAML syntax error on line #{e.line}: #{e.problem}"
-      end
-      new(path, raw)
-    end
-
     def initialize(path, raw)
       @path = path
       @raw = raw
@@ -121,7 +105,7 @@ module Crossbuild
     def validate!
       return self if valid?
 
-      lines = ["#{path}: build.yaml schema is invalid (#{@errors.size} errors):"]
+      lines = ["#{path}: the build: section is invalid (#{@errors.size} errors):"]
       @errors.each { |e| lines << "  ✗ #{e}" }
       lines << 'Build aborted: fix the listed nodes and retry.'
       raise InvalidManifestError, lines.join("\n")
@@ -132,9 +116,9 @@ module Crossbuild
       lines = []
       if valid?
         noun = @entries.size == 1 ? 'entry' : 'entries'
-        lines << "#{path}: schema is valid (#{@entries.size} #{noun}: #{@entries.map(&:id).join(', ')})."
+        lines << "#{path}: the build: section is valid (#{@entries.size} #{noun}: #{@entries.map(&:id).join(', ')})."
       else
-        lines << "#{path}: build.yaml schema is invalid (#{@errors.size} errors):"
+        lines << "#{path}: the build: section is invalid (#{@errors.size} errors):"
         @errors.each { |e| lines << "  ✗ #{e}" }
       end
       @warnings.each { |w| lines << "  ⚠ #{w}" }
@@ -174,7 +158,9 @@ module Crossbuild
 
     def validate
       unless @raw.is_a?(Hash) && !@raw.empty?
-        @errors << Issue.new('(root)', 'file must be a non-empty mapping with at least a name and a matrix')
+        @errors << Issue.new('(root)',
+                             'the build: section of crosspack.yml is missing or empty — ' \
+                             'the deps and build stages need it (matrix, steps, artifacts)')
         return
       end
 
@@ -189,7 +175,7 @@ module Crossbuild
     def validate_name
       @name = @raw['name'].to_s
       if @raw['name'].nil? || @name.empty?
-        @errors << Issue.new('name', 'is required: the application name, e.g. myapp')
+        @errors << Issue.new('name', 'is required at the top level of crosspack.yml, e.g. name: myapp')
       elsif @name !~ NAME_RE
         @errors << Issue.new('name', "invalid name #{@name.inspect} (letters, digits, \"+\", \"_\", \"-\", \".\")")
       end
@@ -198,7 +184,7 @@ module Crossbuild
     def validate_version
       spec = @raw['version']
       if spec.nil?
-        @warnings << Issue.new('version', 'not set — defaulting to calver (YYYY.MM.DD-<secs>)')
+        @warnings << Issue.new('version', 'not set at the top level of crosspack.yml — defaulting to calver (YYYY.MM.DD-<secs>)')
         @version = 'calver'
         return
       end

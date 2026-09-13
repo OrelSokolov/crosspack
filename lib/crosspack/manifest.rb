@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
-require 'yaml'
-
 module Crosspack
-  # Canonical dependency names crosspack knows about. Anything else in
-  # deps.yaml still resolves, but produces a warning (possible typo).
+  # Canonical dependency names crosspack knows about. Anything else in the
+  # deps: section still resolves, but produces a warning (possible typo).
   KNOWN_CANONICAL = %w[
     webkit2gtk gtk3 openmp ayatana-appindicator
     glib2 cairo pango gdk-pixbuf alsa-lib pulseaudio dbus
@@ -15,7 +13,8 @@ module Crosspack
 
   CANONICAL_NAME_RE = /\A[a-z0-9][a-z0-9+._-]*\z/.freeze
 
-  # A single schema problem: full path into deps.yaml + human explanation.
+  # A single schema problem: full path into the deps: section + human
+  # explanation.
   class Issue
     attr_reader :path, :message
 
@@ -31,32 +30,18 @@ module Crosspack
 
   class InvalidManifestError < StandardError; end
 
-  # Parses and validates deps.yaml. Root keys are canonical dependency
-  # names; each maps to { targets: { family: { "version": [pkgs] } } } or a
-  # scalar verdict for a whole family. A reserved top-level `version:` key
-  # declares the schema version (see SCHEMA_VERSION).
+  # Parses and validates the deps: section of crosspack.yml. Keys are
+  # canonical dependency names; each maps to
+  # { targets: { family: { "version": [pkgs] } } } or a scalar verdict for a
+  # whole family. A reserved `version:` key inside the section declares the
+  # schema version (see SCHEMA_VERSION).
   class Manifest
-    # The deps.yaml schema version this crosspack understands. Files
+    # The deps: section schema version this crosspack understands. Sections
     # declaring a newer version are rejected at load time with an upgrade
     # hint; older (or absent) versions are accepted.
     SCHEMA_VERSION = 1
 
     attr_reader :path, :deps, :schema_version, :errors, :warnings
-
-    def self.load(path)
-      unless File.file?(path)
-        raise InvalidManifestError,
-              "Dependencies file not found: #{path}\n" \
-              'Create deps.yaml next to the Rakefile (see crosspack/README.md).'
-      end
-      begin
-        raw = YAML.safe_load(File.read(path), permitted_classes: [], aliases: false)
-      rescue Psych::SyntaxError => e
-        raise InvalidManifestError,
-              "#{path}: YAML syntax error on line #{e.line}: #{e.problem}"
-      end
-      new(path, raw)
-    end
 
     def initialize(path, raw)
       @path = path
@@ -77,7 +62,7 @@ module Crosspack
     def validate!
       return self if valid?
 
-      lines = ["#{path}: deps.yaml schema is invalid (#{@errors.size} errors):"]
+      lines = ["#{path}: the deps: section is invalid (#{@errors.size} errors):"]
       @errors.each { |e| lines << "  ✗ #{e}" }
       lines << 'Build aborted: fix the listed nodes and retry.'
       raise InvalidManifestError, lines.join("\n")
@@ -87,9 +72,9 @@ module Crosspack
     def error_report
       lines = []
       if valid?
-        lines << "#{path}: schema is valid."
+        lines << "#{path}: the deps: section is valid."
       else
-        lines << "#{path}: deps.yaml schema is invalid (#{@errors.size} errors):"
+        lines << "#{path}: the deps: section is invalid (#{@errors.size} errors):"
         @errors.each { |e| lines << "  ✗ #{e}" }
       end
       @warnings.each { |w| lines << "  ⚠ #{w}" }
@@ -113,7 +98,7 @@ module Crosspack
       return if v <= SCHEMA_VERSION
 
       raise InvalidManifestError,
-            "#{@path}: deps.yaml declares schema version #{v}, " \
+            "#{@path}: the deps: section declares schema version #{v}, " \
             "but this crosspack (#{Crosspack::VERSION}) supports up to #{SCHEMA_VERSION}. " \
             'Update the gem (gem update crosspack) or lower the declared version.'
     end
@@ -122,7 +107,8 @@ module Crosspack
       unless @raw.is_a?(Hash) && !@raw.empty?
         @errors << Issue.new(
           '(root)',
-          'file must be a non-empty mapping: canonical name -> { targets: ... }'
+          'the deps: section of crosspack.yml is missing or empty — ' \
+          'it must map canonical names to per-distro packages'
         )
         return
       end

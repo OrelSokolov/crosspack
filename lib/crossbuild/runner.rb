@@ -4,7 +4,7 @@ module Crossbuild
   # Runs the shell steps of a matrix entry from the project root. Commands may
   # reference build facts via {{version}}, {{name}}, {{platform}}, {{os}},
   # {{arch}} and {{id}} placeholders — expanded by the gem itself so the same
-  # build.yaml works under POSIX shells and cmd.exe. The same facts are also
+  # config works under POSIX shells and cmd.exe. The same facts are also
   # exported as CROSSBUILD_* environment variables.
   class Runner
     class BuildError < Error; end

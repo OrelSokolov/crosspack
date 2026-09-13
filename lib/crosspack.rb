@@ -4,6 +4,7 @@ require_relative 'crosspack/version'
 require_relative 'crosspack/target'
 require_relative 'crosspack/manifest'
 require_relative 'crosspack/package_manifest'
+require_relative 'crosspack/config'
 require_relative 'crosspack/resolver'
 require_relative 'crosspack/matrix'
 require_relative 'crosspack/builds'
@@ -30,8 +31,8 @@ module Crosspack
   #   executables: [destination paths to chmod 0755]
   class BuildError < StandardError; end
 
-  # Convenience wrapper: Crosspack.pack(manifest: 'package.yaml',
-  # deps: 'deps.yaml', target: Target.parse('debian-12'), version: '1.0-1')
+  # Convenience wrapper: Crosspack.pack(config: 'crosspack.yml',
+  # target: Target.parse('debian-12'), version: '1.0-1')
   def self.pack(**kwargs)
     Packer.pack(**kwargs)
   end

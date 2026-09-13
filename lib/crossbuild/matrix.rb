@@ -14,7 +14,7 @@ module Crossbuild
 
     def render
       host = "#{@host_os}/#{Platform.display_arch(@host_arch)}"
-      lines = ["build.yaml matrix — host: #{host}"]
+      lines = ["build matrix — host: #{host}"]
       @manifest.entries.each { |e| lines << render_entry(e) }
       buildable = @manifest.buildable_entries(@host_os, @host_arch)
       lines << if buildable.empty?

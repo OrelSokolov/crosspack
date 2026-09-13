@@ -21,34 +21,33 @@ class PackerTest < Minitest::Test
     FileUtils.mkdir_p(File.join(@root, 'build'))
     File.write(File.join(@root, 'build', 'icon.png'), 'png')
 
-    File.write(File.join(@root, 'package.yaml'), <<~YAML)
+    File.write(File.join(@root, 'crosspack.yml'), <<~YAML)
       name: app
-      maintainer: Test <t@example.com>
-      description: |-
-        Test app
-        Second line
-      sources: builds
-      prefix: usr/local
-      lib_dir: lib/app
-      payload: [app, model.bin]
-      executables: [app]
-      links:
-        bin/app: ../lib/app/app
-      desktop:
-        name: App
-        comment: Test comment
-      icon: build/icon.png
-    YAML
-
-    File.write(File.join(@root, 'deps.yaml'), <<~YAML)
-      webkit2gtk:
-        targets:
-          debian:
-            "12": [libwebkit2gtk-4.1-0]
-          fedora:
-            "*": [webkit2gtk4.1]
-          arch:
-            "*": [webkit2gtk-4.1]
+      package:
+        maintainer: Test <t@example.com>
+        description: |-
+          Test app
+          Second line
+        sources: builds
+        prefix: usr/local
+        lib_dir: lib/app
+        payload: [app, model.bin]
+        executables: [app]
+        links:
+          bin/app: ../lib/app/app
+        desktop:
+          name: App
+          comment: Test comment
+        icon: build/icon.png
+      deps:
+        webkit2gtk:
+          targets:
+            debian:
+              "12": [libwebkit2gtk-4.1-0]
+            fedora:
+              "*": [webkit2gtk4.1]
+            arch:
+              "*": [webkit2gtk-4.1]
     YAML
   end
 
@@ -58,8 +57,7 @@ class PackerTest < Minitest::Test
 
   def pack(target_str, output_base = File.join(@root, 'crosspacks'))
     Crosspack.pack(
-      manifest: File.join(@root, 'package.yaml'),
-      deps: File.join(@root, 'deps.yaml'),
+      config: File.join(@root, 'crosspack.yml'),
       target: Crosspack::Target.parse(target_str),
       version: '2026.08.31-1234',
       root: @root,
@@ -112,8 +110,7 @@ class PackerTest < Minitest::Test
     stamp = File.join(@root, 'builds', 'debian', '12', 'amd64', Crossbuild::Distributor::STAMP_NAME)
     File.write(stamp, "7.7.7\n")
     path = Crosspack.pack(
-      manifest: File.join(@root, 'package.yaml'),
-      deps: File.join(@root, 'deps.yaml'),
+      config: File.join(@root, 'crosspack.yml'),
       target: Crosspack::Target.parse('debian-12'),
       version: nil,
       root: @root,
@@ -125,8 +122,7 @@ class PackerTest < Minitest::Test
   def test_pack_without_version_and_stamp_raises_stage_hint
     error = assert_raises(Crosspack::BuildError) do
       Crosspack.pack(
-        manifest: File.join(@root, 'package.yaml'),
-        deps: File.join(@root, 'deps.yaml'),
+        config: File.join(@root, 'crosspack.yml'),
         target: Crosspack::Target.parse('arch'),
         version: nil,
         root: @root,
@@ -154,9 +150,9 @@ class PackerTest < Minitest::Test
   end
 
   def test_pack_invalid_package_manifest_lists_errors
-    File.write(File.join(@root, 'package.yaml'), "name: app\n")
+    File.write(File.join(@root, 'crosspack.yml'), "name: app\npackage:\n  summary: x\n")
     error = assert_raises(Crosspack::InvalidManifestError) { pack('debian-12') }
-    assert_includes error.message, 'package.yaml'
+    assert_includes error.message, 'the package: section'
   end
 
   def test_pack_unsupported_format
@@ -179,6 +175,47 @@ class PackerTest < Minitest::Test
     # Maintainer with "Name <email>" must be XML-escaped, not inlined raw.
     assert_includes content, 'Manufacturer="Test &lt;t@example.com&gt;"'
     assert File.file?(File.join(File.dirname(path), 'BUILD-MSI.txt'))
+  end
+
+  def test_pack_windows_resolves_payload_names
+    win_dir = File.join(@root, 'builds', 'windows', '11.0', 'x86_64')
+    File.delete(File.join(win_dir, 'app'))
+    File.delete(File.join(win_dir, 'model.bin'))
+    File.write(File.join(win_dir, 'app.exe'), 'exe')
+    File.write(File.join(win_dir, 'model.onnx'), 'model')
+    File.write(File.join(win_dir, 'onnxruntime.dll'), 'dll')
+    File.write(File.join(@root, 'crosspack.yml'), <<~YAML)
+      name: app
+      package:
+        maintainer: Test <t@example.com>
+        description: |-
+          Test app
+        sources: builds
+        prefix: usr/local
+        payload:
+          app:
+            "*": app
+            windows: app.exe
+          model.onnx:
+          onnxruntime.dll:
+            windows: onnxruntime.dll
+        executables: [app]
+      deps:
+        webkit2gtk:
+          targets:
+            debian:
+              "12": [libwebkit2gtk-4.1-0]
+            windows: system
+    YAML
+
+    path = pack('windows-11.0')
+    content = File.read(path)
+    assert path.end_with?('.wxs')
+    assert_includes content, 'app.exe'
+    assert_includes content, 'onnxruntime.dll'
+    assert_includes content, 'model.onnx'
+    # The unix name must not leak into the Windows payload.
+    refute_includes content, 'x86_64\\app"'
   end
 
   def test_pack_macos_stages_app_bundle

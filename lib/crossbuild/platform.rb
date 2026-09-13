@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 module Crossbuild
-  # Host platform detection, normalized to the os/arch vocabulary build.yaml
-  # uses: linux/amd64, darwin/arm64, windows/amd64.
+  # Host platform detection, normalized to the os/arch vocabulary the
+  # build: section uses: linux/amd64, darwin/arm64, windows/amd64.
   module Platform
     OS_BY_RUBY = {
       linux: /linux/,
@@ -45,7 +45,7 @@ module Crossbuild
       facts['ID']
     end
 
-    # Ordered host selectors for the deps: matrix of build.yaml — distro id,
+    # Ordered host selectors for the deps: rules of the build: section — distro id,
     # then ID_LIKE tokens (Linux only), then the os, then "*" as the final
     # wildcard. The first selector with a matching rule wins.
     def self.selectors

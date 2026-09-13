@@ -16,20 +16,18 @@ def abort_with(message)
   exit 1
 end
 
-options = { file: 'deps.yaml', package: 'package.yaml', build: 'build.yaml', arch: 'amd64',
+options = { file: Crosspack::Config::DEFAULT_PATH, arch: 'amd64',
             format: nil, version: nil, root: Dir.pwd, output_base: nil,
             check_only: false, no_deps: false, all: false }
 parser = OptionParser.new do |opts|
   opts.banner = "crosspack #{Crosspack::VERSION} — staged pipeline: deps → build → pack\n" \
                 "Usage: crosspack <command> [options]\n" \
-                "Stages:   deps <target> [--check]      verify/install build deps for the target's host\n" \
-                "          build <target>|--all          compile the target's matrix entry into builds/\n" \
-                "          pack <target> [--version X]   package builds/<target> (version from the build stamp)\n" \
+                "Stages:   deps [<target>] [--check]      verify/install build deps (default: this host)\n" \
+                "          build [<target>]|--all          compile into builds/ (default: this host)\n" \
+                "          pack [<target>] [--version X]   package builds/<target> (default: this host; version from the build stamp)\n" \
                 'Commands: validate, resolve, matrix, version, targets'
 
-  opts.on('-f', '--file PATH', 'path to deps.yaml (default: ./deps.yaml)') { |v| options[:file] = v }
-  opts.on('--package PATH', 'path to package.yaml (default: ./package.yaml)') { |v| options[:package] = v }
-  opts.on('--build PATH', 'path to build.yaml (default: ./build.yaml)') { |v| options[:build] = v }
+  opts.on('-f', '--file PATH', 'path to crosspack.yml (default: ./crosspack.yml)') { |v| options[:file] = v }
   opts.on('--arch ARCH', 'architecture: amd64/x86_64, arm64/aarch64 (default: amd64)') { |v| options[:arch] = v }
   opts.on('--format FORMAT', 'output format for resolve: deb, rpm, pkgbuild (default: derived from the target)') { |v| options[:format] = v.to_sym }
   opts.on('--version VERSION', 'override the version for build/pack') { |v| options[:version] = v }
@@ -53,17 +51,22 @@ command = ARGV.shift
 abort_with 'No command given. See: crosspack --help' if command.nil?
 
 # Positional argument: a target for the stage commands (deps/build/pack,
-# resolve), a deps.yaml path for validate.
+# resolve), a crosspack.yml path for validate.
 positional = ARGV.shift if ARGV.first && !ARGV.first.start_with?('-')
 
-build_path = File.expand_path(options[:build], options[:root])
-build_manifest = if File.file?(build_path)
-                   begin
-                     Crossbuild::BuildManifest.load(build_path)
-                   rescue Crossbuild::InvalidManifestError => e
-                     abort_with e.message
-                   end
-                 end
+options[:file] = positional if command == 'validate' && positional
+
+begin
+  config = Crosspack::Config.load(File.expand_path(options[:file], options[:root]))
+rescue Crosspack::InvalidManifestError => e
+  abort_with e.message
+end
+
+# validate prints the full report itself and exits by status; everything
+# else stops on a broken top level first.
+if command != 'validate'
+  abort_with config.error_report unless config.valid?
+end
 
 # The matrix entry that builds `target` — the deps/build stages operate on
 # its host platform.
@@ -78,46 +81,43 @@ def entry_for_target!(manifest, target, host_os, host_arch)
   entry
 end
 
+# Stage commands (deps/build/pack) run for the current host when no target
+# is given: macos, windows-11.0 or the distro from /etc/os-release.
+def host_target!(command)
+  raw = Crosspack::Target.host_string
+  abort_with "Could not detect this host's target — pass one explicitly: crosspack #{command} <target> " \
+             '(families: ubuntu-24.04, debian-12, fedora-41, arch, macos, windows-11.0)' if raw.nil?
+
+  puts "→ no target given; using this host's target: #{raw}"
+  raw
+end
+
 case command
 when 'validate'
-  if positional
-    options[:file] = positional
-  elsif build_manifest.nil?
-    warn "note: #{options[:build]} not found — the deps/build stages need it (validate covered deps/package only)"
-  end
-  begin
-    pkg = Crosspack::PackageManifest.load(File.expand_path(options[:package], options[:root]))
-  rescue Crosspack::InvalidManifestError => e
-    abort_with e.message
-  end
-  begin
-    manifest = Crosspack::Manifest.load(File.expand_path(options[:file], options[:root]))
-  rescue Crosspack::InvalidManifestError => e
-    abort_with e.message
-  end
-  puts manifest.error_report
+  deps_manifest = config.deps_manifest
+  pkg = config.package_manifest
+  build_manifest = config.build_manifest
+  puts config.error_report
+  puts deps_manifest.error_report
   puts pkg.error_report
-  puts build_manifest.error_report if build_manifest
-  ok = manifest.valid? && pkg.valid? && (build_manifest.nil? || build_manifest.valid?)
+  puts build_manifest.error_report
+  ok = config.valid? && deps_manifest.valid? && pkg.valid? && build_manifest.valid?
   exit(ok ? 0 : 1)
 when 'matrix'
-  begin
-    manifest = Crosspack::Manifest.load(File.expand_path(options[:file], options[:root]))
-  rescue Crosspack::InvalidManifestError => e
-    abort_with e.message
-  end
-  abort_with 'deps.yaml schema is invalid — run: crosspack validate' unless manifest.valid?
-  puts Crosspack::Matrix.new(manifest).render
-  if build_manifest
+  deps_manifest = config.deps_manifest
+  abort_with 'the deps: section is invalid — run: crosspack validate' unless deps_manifest.valid?
+  puts Crosspack::Matrix.new(deps_manifest).render
+  build_manifest = config.build_manifest
+  if build_manifest.valid?
     puts "\n#{Crossbuild::Matrix.new(build_manifest).render}"
   else
-    warn "\nnote: #{options[:build]} not found — build matrix not shown"
+    warn "\nnote: no valid build: section — build matrix not shown (crosspack validate)"
   end
 when 'resolve'
   target_str = positional
   abort_with 'Specify a target: crosspack resolve debian-12 (see crosspack --help)' unless target_str
   begin
-    manifest = Crosspack::Manifest.load(File.expand_path(options[:file], options[:root]))
+    manifest = config.deps_manifest
     target = Crosspack::Target.parse(target_str, arch: options[:arch])
     resolver = Crosspack::Resolver.new(manifest)
     format = options[:format] || target.format
@@ -134,17 +134,18 @@ when 'resolve'
     abort_with e.message
   end
 when 'version'
-  abort_with "#{options[:build]} not found — crosspack version needs a build manifest" unless build_manifest
-  abort_with 'Schema is invalid. Run: crosspack validate' unless build_manifest.valid?
+  build_manifest = config.build_manifest
+  abort_with 'the build: section is invalid — run: crosspack validate' unless build_manifest.valid?
   begin
     puts Crossbuild::VersionScheme.new(build_manifest.version).compute(root: options[:root])
   rescue Crossbuild::VersionScheme::Error => e
     abort_with e.message
   end
 when 'deps'
-  abort_with 'Specify a target: crosspack deps debian-12 (see crosspack --help)' unless positional
-  abort_with "#{options[:build]} not found — crosspack deps needs a build manifest" unless build_manifest
-  entry_for_target!(build_manifest, positional, Crossbuild::Platform.os, Crossbuild::Platform.arch)
+  target_str = positional || host_target!('deps')
+  build_manifest = config.build_manifest
+  abort_with 'the build: section is invalid — run: crosspack validate' unless build_manifest.valid?
+  entry_for_target!(build_manifest, target_str, Crossbuild::Platform.os, Crossbuild::Platform.arch)
   installer = Crossbuild::DepInstaller.new(build_manifest, root: options[:root])
   begin
     if options[:check_only]
@@ -158,12 +159,12 @@ when 'deps'
   end
   puts "deps ready:\n#{installer.report}"
 when 'build'
-  abort_with "#{options[:build]} not found — crosspack build needs a build manifest" unless build_manifest
+  build_manifest = config.build_manifest
+  abort_with 'the build: section is invalid — run: crosspack validate' unless build_manifest.valid?
   if options[:all]
     target = nil
   else
-    abort_with 'Specify a target: crosspack build ubuntu-24.04 (or --all for every host-buildable entry)' unless positional
-    target = positional
+    target = positional || host_target!('build')
   end
   begin
     result = Crossbuild::Builder.new(build_manifest, root: options[:root],
@@ -175,31 +176,26 @@ when 'build'
   puts "\n📦 #{result.entries.size} entr#{result.entries.size == 1 ? 'y' : 'ies'} built, version #{result.version}"
   puts 'Pack with: crosspack pack <target>'
 when 'pack'
-  abort_with 'Specify a target: crosspack pack debian-12' unless positional
+  target_str = positional || host_target!('pack')
   begin
-    target = Crosspack::Target.parse(positional, arch: options[:arch])
+    target = Crosspack::Target.parse(target_str, arch: options[:arch])
     path = Crosspack.pack(
-      manifest: options[:package],
-      deps: options[:file],
+      config: config,
       target: target,
       version: options[:version],
       root: options[:root],
       output_base: options[:output_base] || 'crosspacks'
     )
   rescue Crosspack::Target::Error => e
-    abort_with "Invalid target #{positional.inspect}: #{e.message}"
+    abort_with "Invalid target #{target_str.inspect}: #{e.message}"
   rescue Crosspack::InvalidManifestError, Crosspack::ResolveError, Crosspack::BuildError => e
     abort_with e.message
   end
   puts "📦 #{path}"
 when 'targets'
   # What can actually be packed: builds tree + resolvable deps per target.
-  pkg_path = File.expand_path(options[:package], options[:root])
-  sources = begin
-    Crosspack::PackageManifest.load(pkg_path).sources
-  rescue Crosspack::InvalidManifestError
-    nil
-  end
+  pkg = config.package_manifest
+  sources = pkg.valid? ? pkg.sources : nil
   root = sources ? File.expand_path(sources, options[:root]) : File.join(options[:root], 'builds')
   puts Crosspack::Builds.report(root)
 else

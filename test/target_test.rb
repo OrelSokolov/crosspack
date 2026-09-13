@@ -67,4 +67,42 @@ class TargetTest < Minitest::Test
     arm = Crosspack::Target.parse('fedora-41', arch: 'aarch64')
     assert_equal 'aarch64', arm.package_arch(:rpm)
   end
+
+  def test_host_string_macos_and_windows
+    assert_equal 'macos', Crosspack::Target.host_string(ruby_platform: 'x86_64-darwin24')
+    assert_equal 'windows-11.0', Crosspack::Target.host_string(ruby_platform: 'x64-mingw-ucrt')
+  end
+
+  def test_host_string_linux_distro_with_version
+    Dir.mktmpdir('crosspack-host') do |dir|
+      release = File.join(dir, 'os-release')
+      File.write(release, "ID=ubuntu\nVERSION_ID=\"24.04\"\n")
+      assert_equal 'ubuntu-24.04', Crosspack::Target.host_string(ruby_platform: 'x86_64-linux', release_path: release)
+
+      File.write(release, "ID=arch\n")
+      assert_equal 'arch', Crosspack::Target.host_string(ruby_platform: 'x86_64-linux', release_path: release)
+
+      File.write(release, "ID=debian\nVERSION_ID=13\n")
+      assert_equal 'debian-13', Crosspack::Target.host_string(ruby_platform: 'x86_64-linux', release_path: release)
+    end
+  end
+
+  def test_host_string_linux_falls_back_to_id_like
+    Dir.mktmpdir('crosspack-host') do |dir|
+      release = File.join(dir, 'os-release')
+      File.write(release, "ID=linuxmint\nID_LIKE=\"ubuntu debian\"\nVERSION_ID=22\n")
+      assert_equal 'ubuntu-22', Crosspack::Target.host_string(ruby_platform: 'x86_64-linux', release_path: release)
+    end
+  end
+
+  def test_host_string_unrecognizable_hosts
+    assert_nil Crosspack::Target.host_string(ruby_platform: 'x86_64-linux', release_path: '/nonexistent/os-release')
+
+    Dir.mktmpdir('crosspack-host') do |dir|
+      release = File.join(dir, 'os-release')
+      # Debian sid carries no VERSION_ID — nothing to pin a target version to.
+      File.write(release, "ID=debian\n")
+      assert_nil Crosspack::Target.host_string(ruby_platform: 'x86_64-linux', release_path: release)
+    end
+  end
 end

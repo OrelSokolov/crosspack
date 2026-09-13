@@ -140,8 +140,8 @@ class DepInstallerTest < Minitest::Test
   end
 
   def load_manifest(dir, body)
-    file = File.join(dir, 'build.yaml')
-    File.write(file, body)
-    Crossbuild::BuildManifest.load(file)
+    file = File.join(dir, 'crosspack.yml')
+    File.write(file, "name: app\nbuild:\n#{body.lines.map { |l| l.strip.empty? ? "\n" : "  #{l}" }.join}")
+    Crosspack::Config.load(file).build_manifest
   end
 end

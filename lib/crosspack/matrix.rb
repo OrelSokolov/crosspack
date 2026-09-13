@@ -4,7 +4,7 @@ require 'set'
 
 module Crosspack
   # Renders the dependency x target matrix straight from the manifest.
-  # Columns come from the targets declared in deps.yaml itself.
+  # Columns come from the targets declared in the deps: section itself.
   class Matrix
     def initialize(manifest)
       @manifest = manifest
@@ -12,7 +12,7 @@ module Crosspack
 
     def render
       columns = target_columns
-      return 'deps.yaml is empty — nothing to show.' if columns.empty?
+      return 'the deps: section is empty — nothing to show.' if columns.empty?
 
       header = ['dependency'] + columns.map(&:to_s)
       rows = @manifest.deps.map do |name, body|

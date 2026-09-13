@@ -99,16 +99,16 @@ class ManifestTest < Minitest::Test
 
   def test_missing_file_error_mentions_path
     error = assert_raises(Crosspack::InvalidManifestError) do
-      Crosspack::Manifest.load('/nonexistent/deps.yaml')
+      Crosspack::Config.load('/nonexistent/crosspack.yml')
     end
     assert_includes error.message, 'not found'
-    assert_includes error.message, 'deps.yaml'
+    assert_includes error.message, 'crosspack.yml'
   end
 
   def test_yaml_syntax_error_is_reported_with_line
-    file = File.join(Dir.mktmpdir('crosspack-syntax'), 'deps.yaml')
-    File.write(file, "webkit2gtk:\n  targets:\n   [broken\n")
-    error = assert_raises(Crosspack::InvalidManifestError) { Crosspack::Manifest.load(file) }
+    file = File.join(Dir.mktmpdir('crosspack-syntax'), 'crosspack.yml')
+    File.write(file, "deps:\n  webkit2gtk:\n    targets:\n     [broken\n")
+    error = assert_raises(Crosspack::InvalidManifestError) { Crosspack::Config.load(file) }
     assert_includes error.message, 'YAML syntax error'
   end
 

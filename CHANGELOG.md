@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-09-13
+
+### Added
+- Host target default: `crosspack deps` / `build` / `pack` invoked without a
+  target run for the current host — `macos`, `windows-11.0` or the distro
+  family + version from `/etc/os-release` (unknown distro ids fall back to
+  the first known `ID_LIKE` token; unrecognizable hosts ask for an explicit
+  target).
+- Per-target payload names: `package.payload` entries may now be written as a
+  mapping `common key -> {target selector -> real file name}` instead of a
+  flat list. The key is the common name (used verbatim on every target
+  unless overridden); selectors are an exact target (`windows-11.0`), a
+  family (`windows`) or `"*"` (exact target wins, then family, then `"*"`).
+  An entry with a selector map applies only to targets it covers, so one
+  payload lists `app`/`app.exe`, `.so` libraries and Windows DLLs together —
+  each target resolves to the files its build actually produced. The flat
+  list form remains valid (same name everywhere). `executables` keeps naming
+  common keys and resolves per target at pack time.
+
+[0.6.0]: https://github.com/OrelSokolov/crosspack/releases/tag/v0.6.0
+
+## [0.5.1] - 2026-09-13
+
+### Fixed
+- Gem metadata: the summary/description no longer mention the removed
+  build.yaml — they describe the single crosspack.yml config.
+
+## [0.5.0] - 2026-09-13
+
+### Breaking
+- One config file: `build.yaml`, `package.yaml` and `deps.yaml` are merged
+  into a single `crosspack.yml` with `build:` / `package:` / `deps:`
+  sections and a shared top-level `name:` (plus optional `version:`, the
+  build version scheme). The three old files are no longer read — move each
+  file's body under its section, hoist `name`/`version` to the top. No
+  migration path is provided (0.4.0 was never published beyond local gem
+  builds).
+- CLI: `-f/--file` now points at crosspack.yml (default `./crosspack.yml`);
+  the `--package` and `--build` flags are gone.
+- Library API: `Crosspack.pack` takes `config:` (a Config or a path to
+  crosspack.yml); `Crossbuild.build` accepts a Config, a path or a ready
+  BuildManifest; the manifest classes no longer read files —
+  `Manifest.load` / `PackageManifest.load` / `BuildManifest.load` are gone,
+  `Crosspack::Config.load` is the single loader.
+
+### Added
+- `Crosspack::Config`: top-level validation (name required once, version
+  scheme, unknown keys) with the shared name/version injected into the
+  build section and the name into the package section; each section keeps
+  its own schema and path-pointing error messages.
+
 ## [0.4.0] - 2026-09-13
 
 ### Breaking

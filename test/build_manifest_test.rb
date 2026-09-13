@@ -69,15 +69,15 @@ class BuildManifestTest < Minitest::Test
   end
 
   def test_missing_file
-    assert_raises(Crossbuild::InvalidManifestError) do
-      Crossbuild::BuildManifest.load('/nonexistent/build.yaml')
+    assert_raises(Crosspack::InvalidManifestError) do
+      Crosspack::Config.load('/nonexistent/crosspack.yml')
     end
   end
 
   def test_yaml_syntax_error
-    file = File.join(Dir.mktmpdir('crossbuild-test'), 'build.yaml')
-    File.write(file, "name: [unclosed\n  matrix:")
-    error = assert_raises(Crossbuild::InvalidManifestError) { Crossbuild::BuildManifest.load(file) }
+    file = File.join(Dir.mktmpdir('crossbuild-test'), 'crosspack.yml')
+    File.write(file, "name: [unclosed\nbuild:\n  matrix:")
+    error = assert_raises(Crosspack::InvalidManifestError) { Crosspack::Config.load(file) }
     assert_includes error.message, 'YAML syntax error'
   end
 
@@ -94,7 +94,7 @@ class BuildManifestTest < Minitest::Test
   end
 
   def test_missing_name
-    m = load_manifest("matrix:\n  - build: linux/amd64\n    steps: ['true']\n")
+    m = load_config_section('build', "matrix:\n  - build: linux/amd64\n    steps: ['true']\n", '')
     refute m.valid?
     assert(m.errors.any? { |e| e.path == 'name' })
   end
@@ -176,13 +176,13 @@ class BuildManifestTest < Minitest::Test
   def test_validate_bang_raises_formatted_report
     m = load_manifest("name: app\nmatrix: []\n")
     error = assert_raises(Crossbuild::InvalidManifestError) { m.validate! }
-    assert_includes error.message, 'build.yaml schema is invalid'
+    assert_includes error.message, 'the build: section is invalid'
     assert_includes error.message, 'matrix'
   end
 
   def test_error_report_valid_form
     m = load_manifest(VALID)
-    assert_includes m.error_report, 'schema is valid (2 entries: linux/amd64, windows)'
+    assert_includes m.error_report, 'the build: section is valid (2 entries: linux/amd64, windows)'
   end
 
   def test_buildable_entries_and_find
