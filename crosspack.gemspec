@@ -8,12 +8,10 @@ Gem::Specification.new do |spec|
   spec.authors = ['Oleg Orlov']
   spec.email = ['orelcokolov@gmail.com']
 
-  spec.summary = 'One config (crosspack.yml), staged pipeline: deps → build → pack native packages (deb/rpm/PKGBUILD/winget/cask)'
-  spec.description = 'One command, one config file, one target vocabulary: crosspack deps <target> verifies and ' \
-                     'installs the build host dependencies, crosspack build <target> runs the crosspack.yml ' \
-                     'build matrix entry and fans artifacts into builds/, crosspack pack <target> turns that ' \
-                     'tree into a native package. Stages are gated — no packing before building — and keyed by ' \
-                     'the same target strings throughout.'
+  spec.summary = 'Painless packaging for any platform'
+  spec.description = 'The build matrix in crosspack.yml helps you to build and deliver your program ' \
+                     'without pain — one config drives a staged pipeline (deps → build → pack) that ' \
+                     'produces native packages for every platform: deb, rpm, PKGBUILD, winget and cask.'
   spec.homepage = 'https://github.com/OrelSokolov/crosspack'
   spec.license = 'Nonstandard'
 
