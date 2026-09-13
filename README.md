@@ -1,4 +1,10 @@
+<p align="center">
+  <img src="logo.png" width="220" alt="crosspack" />
+</p>
+
 # crosspack
+
+> Painless packaging for any platform.
 
 Cross-platform build **and** pack toolchain for Wails-style desktop apps,
 shipped as one gem, one command, one config file and a staged pipeline:
