@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-09-13
+
+### Fixed
+- `crosspack deps` no longer dumps a Ruby backtrace when the (detected or
+  given) target has no matrix entry — it aborts with the plain message, now
+  with an actionable hint (pass a declared target or extend artifacts.to).
+- `crosspack --version` (bare, also `-v`) prints the gem version instead of
+  demanding an argument; `--version X` keeps overriding the build/pack
+  version.
+
+[0.6.1]: https://github.com/OrelSokolov/crosspack/releases/tag/v0.6.1
+
 ## [0.6.0] - 2026-09-13
 
 ### Added

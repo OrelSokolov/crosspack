@@ -143,7 +143,8 @@ module Crossbuild
       if matches.empty?
         raise Error,
               "no matrix entry distributes to target #{raw.inspect}; " \
-              "declared targets: #{declared.join(', ')}"
+              "declared targets: #{declared.join(', ')}. Pass one of them explicitly, " \
+              "or add #{raw.inspect} to the entry's artifacts.to in crosspack.yml"
       end
       if matches.size > 1
         raise Error,

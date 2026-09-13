@@ -19,6 +19,13 @@ end
 options = { file: Crosspack::Config::DEFAULT_PATH, arch: 'amd64',
             format: nil, version: nil, root: Dir.pwd, output_base: nil,
             check_only: false, no_deps: false, all: false }
+
+# `crosspack --version` (also bare -v) prints the gem version like any other
+# CLI; with a value the flag stays the build/pack version override.
+if ARGV.size == 1 && %w[--version -v].include?(ARGV.first)
+  puts "crosspack #{Crosspack::VERSION}"
+  exit
+end
 parser = OptionParser.new do |opts|
   opts.banner = "crosspack #{Crosspack::VERSION} — staged pipeline: deps → build → pack\n" \
                 "Usage: crosspack <command> [options]\n" \
@@ -30,7 +37,7 @@ parser = OptionParser.new do |opts|
   opts.on('-f', '--file PATH', 'path to crosspack.yml (default: ./crosspack.yml)') { |v| options[:file] = v }
   opts.on('--arch ARCH', 'architecture: amd64/x86_64, arm64/aarch64 (default: amd64)') { |v| options[:arch] = v }
   opts.on('--format FORMAT', 'output format for resolve: deb, rpm, pkgbuild (default: derived from the target)') { |v| options[:format] = v.to_sym }
-  opts.on('--version VERSION', 'override the version for build/pack') { |v| options[:version] = v }
+  opts.on('--version VERSION', 'override the version for build/pack; a bare `crosspack --version` prints the gem version') { |v| options[:version] = v }
   opts.on('--root PATH', 'project root for relative paths (default: .)') { |v| options[:root] = v }
   opts.on('--output-base DIR', 'output directory (build stage: the manifest output, default builds; pack: default ./crosspacks)') { |v| options[:output_base] = v }
   opts.on('--check', 'with `deps`: only report presence, never install (exit 1 if missing)') { options[:check_only] = true }
@@ -79,6 +86,8 @@ def entry_for_target!(manifest, target, host_os, host_arch)
   end
 
   entry
+rescue Crossbuild::Error => e
+  abort_with e.message
 end
 
 # Stage commands (deps/build/pack) run for the current host when no target
@@ -145,9 +154,9 @@ when 'deps'
   target_str = positional || host_target!('deps')
   build_manifest = config.build_manifest
   abort_with 'the build: section is invalid — run: crosspack validate' unless build_manifest.valid?
-  entry_for_target!(build_manifest, target_str, Crossbuild::Platform.os, Crossbuild::Platform.arch)
-  installer = Crossbuild::DepInstaller.new(build_manifest, root: options[:root])
   begin
+    entry_for_target!(build_manifest, target_str, Crossbuild::Platform.os, Crossbuild::Platform.arch)
+    installer = Crossbuild::DepInstaller.new(build_manifest, root: options[:root])
     if options[:check_only]
       installer.check_all
       puts "deps on this host:\n#{installer.report}"
