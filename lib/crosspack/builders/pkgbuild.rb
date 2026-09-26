@@ -11,12 +11,13 @@ module Crosspack
     class Pkgbuild
       def self.generate(name:, version:, release:, pkgdesc:, depends:, arch:,
                         files:, symlinks: {}, executables: [], source:,
-                        maintainer:, url: '', license: 'Proprietary', output:)
+                        sha256: nil, maintainer:, url: '', license: 'Proprietary',
+                        output:)
         content = render(
           name: name, version: version, release: release, pkgdesc: pkgdesc,
           depends: Array(depends), arch: Array(arch), files: files,
           symlinks: symlinks, executables: executables, source: Array(source),
-          maintainer: maintainer, url: url, license: license
+          sha256: sha256, maintainer: maintainer, url: url, license: license
         )
         FileUtils.mkdir_p(File.dirname(output))
         File.write(output, content)
@@ -24,8 +25,8 @@ module Crosspack
       end
 
       def self.render(name:, version:, release:, pkgdesc:, depends:, arch:,
-                      files:, symlinks:, executables:, source:, maintainer:,
-                      url:, license:)
+                      files:, symlinks:, executables:, source:, sha256:,
+                      maintainer:, url:, license:)
         depends_line = depends.map { |d| "'#{d}'" }.join(' ')
         source_line = source.map { |s| "'#{s}'" }.join(' ')
         srcbase = "$srcdir/$pkgname-$pkgver"
@@ -52,7 +53,7 @@ module Crosspack
           license=('#{license}')
           depends=(#{depends_line})
           source=(#{source_line})
-          sha256sums=('SKIP')
+          sha256sums=('#{sha256 || 'SKIP'}')
 
           package() {
           #{(install_lines + link_lines).join("\n")}

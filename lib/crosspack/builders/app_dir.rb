@@ -14,7 +14,8 @@ module Crosspack
       #   CFBundleExecutable, falling back to the package name)
       # icon: path to the bundle icon, copied into Contents/Resources
       def self.build(name:, version:, summary:, files:, executables: [],
-                     display_name: nil, icon: nil, identifier: nil, output:)
+                     display_name: nil, icon: nil, identifier: nil,
+                     min_macos: '11.0', output:)
         app_dir = File.join(output, "#{name}.app")
         FileUtils.rm_rf(app_dir)
         macos_dir = File.join(app_dir, 'Contents', 'MacOS')
@@ -48,7 +49,8 @@ module Crosspack
                          name: name, version: version, summary: summary,
                          executable: executables.first || name,
                          display_name: display_name || name,
-                         icon_file: icon_file, identifier: identifier)
+                         icon_file: icon_file, identifier: identifier,
+                         min_macos: min_macos)
 
         File.write(File.join(output, 'BUILD-DMG.txt'), <<~TXT)
           DMG not built: hdiutil only exists on macOS.
@@ -59,7 +61,8 @@ module Crosspack
       end
 
       def self.write_info_plist(path, name:, version:, summary:, executable:,
-                                display_name:, icon_file: nil, identifier: nil)
+                                display_name:, icon_file: nil, identifier: nil,
+                                min_macos: '11.0')
         bundle_id = identifier || "org.crosspack.#{name}"
         # Without the extension .icns is assumed; other formats (png) must
         # be named in full.
@@ -86,7 +89,7 @@ module Crosspack
             <key>CFBundleInfoDictionaryVersion</key>
             <string>6.0</string>
             <key>LSMinimumSystemVersion</key>
-            <string>11.0</string>
+            <string>#{escape(min_macos)}</string>
             <key>NSPrincipalClass</key>
             <string>NSApplication</string>
             <key>NSSupportsAutomaticTermination</key>

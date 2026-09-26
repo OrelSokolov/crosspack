@@ -21,6 +21,8 @@ class PackerTest < Minitest::Test
     end
     FileUtils.mkdir_p(File.join(@root, 'build'))
     File.write(File.join(@root, 'build', 'icon.png'), 'png')
+    # Sibling .ico for the MSI ARP icon (the manifest icon is the png).
+    File.write(File.join(@root, 'build', 'icon.ico'), 'ico')
 
     File.write(File.join(@root, 'crosspack.yml'), <<~YAML)
       name: app
@@ -41,6 +43,7 @@ class PackerTest < Minitest::Test
           comment: Test comment
           categories: Utility;Audio
         icon: build/icon.png
+        min_macos: '12.0'
       deps:
         webkit2gtk:
           targets:
@@ -87,13 +90,21 @@ class PackerTest < Minitest::Test
     assert_includes listing, 'usr/local/share/pixmaps/app.png'
 
     # The staged .desktop is spec-conformant: every Categories value is
-    # terminated with ";" (the manifest says "Utility;Audio").
+    # terminated with ";" (the manifest says "Utility;Audio") and Exec is
+    # an absolute path (the bin/ symlink from links:).
     Dir.mktmpdir do |x|
       Open3.capture2e('dpkg-deb', '-x', path, x)
       entry = File.read(File.join(x, 'usr/local/share/applications/app.desktop'))
       assert_includes entry, 'Categories=Utility;Audio;'
       assert_includes entry, 'Icon=app'
       assert_includes entry, 'Name=App'
+      assert_includes entry, 'Exec=/usr/local/bin/app'
+
+      Open3.capture2e('dpkg-deb', '-e', path, File.join(x, 'DEBIAN'))
+      %w[postinst postrm].each do |script|
+        content = File.read(File.join(x, 'DEBIAN', script))
+        assert_includes content, 'update-desktop-database -q /usr/local/share/applications'
+      end
     end
   end
 
@@ -130,6 +141,16 @@ class PackerTest < Minitest::Test
     assert_includes content,
                      'install -Dm644 "$srcdir/$pkgname-$pkgver/icon.png" "$pkgdir/usr/local/share/pixmaps/app.png"'
     assert_includes content, "license=('Proprietary')"
+    # makepkg works out of the box: the source tarball referenced by the
+    # PKGBUILD is generated next to it with a real checksum.
+    tarball = File.join(File.dirname(path), 'app-2026.08.31.tar.gz')
+    assert File.file?(tarball)
+    assert_includes content, "sha256sums=('#{Digest::SHA256.file(tarball).hexdigest}')"
+    refute_includes content, "SKIP"
+    listing, = Open3.capture2e('tar', '-tzf', tarball)
+    assert_includes listing, 'app-2026.08.31/app'
+    assert_includes listing, 'app-2026.08.31/app.desktop'
+    assert_includes listing, 'app-2026.08.31/icon.png'
   end
 
   def test_pack_missing_build_dir_gives_actionable_error
@@ -225,6 +246,10 @@ class PackerTest < Minitest::Test
     assert_includes content, '<RegistryValue Root="HKLM" Key="Software\App"'
     assert_includes content, 'KeyPath="yes"'
     assert File.file?(File.join(File.dirname(path), 'BUILD-MSI.txt'))
+    # The ARP icon comes from the .ico sibling of the manifest icon.
+    assert_includes content, '<Property Id="ARPPRODUCTICON" Value="AppIcon" />'
+    assert_includes content, '<Icon Id="AppIcon" SourceFile="icon.ico" />'
+    assert File.file?(File.join(File.dirname(path), 'icon.ico'))
   end
 
   def test_pack_windows_resolves_payload_names
@@ -291,5 +316,8 @@ class PackerTest < Minitest::Test
     assert_includes plist, '<key>CFBundleIconFile</key>'
     assert_includes plist, '<string>icon.png</string>'
     assert File.file?(File.join(path, 'Contents', 'Resources', 'icon.png'))
+    # min_macos from the manifest, not the hardcoded default.
+    assert_includes plist, '<key>LSMinimumSystemVersion</key>'
+    assert_includes plist, '<string>12.0</string>'
   end
 end

@@ -45,6 +45,7 @@ module Crosspack
         stage_files(pkg_root)
         stage_symlinks(pkg_root)
         write_control(File.join(pkg_root, 'DEBIAN'))
+        write_maintainer_scripts(File.join(pkg_root, 'DEBIAN'))
 
         FileUtils.mkdir_p(File.dirname(@output))
         FileUtils.rm_f(@output)
@@ -111,6 +112,38 @@ module Crosspack
         fields << "Depends: #{@depends}" unless @depends.to_s.strip.empty?
         File.write(File.join(debian_dir, 'control'),
                    "#{(fields + ["Description: #{summary}"]).join("\n")}\n#{body.join("\n")}\n")
+      end
+
+      # Desktop integration caches: refresh the application database and the
+      # hicolor icon cache after (un)install when the package carries a
+      # .desktop file or a themed icon. The tools are guarded — they are not
+      # dpkg dependencies, minimal systems may lack them.
+      def write_maintainer_scripts(debian_dir)
+        commands = desktop_cache_commands
+        return if commands.empty?
+
+        script = "#!/bin/sh\nset -e\n#{commands.join("\n")}\n"
+        %w[postinst postrm].each do |script_name|
+          path = File.join(debian_dir, script_name)
+          File.write(path, script)
+          FileUtils.chmod(0o755, path)
+        end
+      end
+
+      def desktop_cache_commands
+        commands = @files.values.select { |d| d.end_with?('.desktop') }
+                         .map { |d| File.dirname(d) }.uniq
+                         .map do |dir|
+                           "if command -v update-desktop-database >/dev/null 2>&1; then " \
+                           "update-desktop-database -q /#{dir} || true; fi"
+                         end
+        commands += @files.values.select { |d| d.include?('/share/icons/') }
+                          .map { |d| File.dirname(d) }.uniq
+                          .map do |dir|
+                            "if command -v gtk-update-icon-cache >/dev/null 2>&1; then " \
+                            "gtk-update-icon-cache -q -t -f /#{dir} || true; fi"
+                          end
+        commands
       end
     end
   end

@@ -14,7 +14,7 @@ module Crosspack
   # no .so libraries and vice versa.
   class PackageManifest
     REQUIRED = %w[maintainer description sources prefix payload].freeze
-    OPTIONAL = %w[name summary license section lib_dir executables links desktop icon].freeze
+    OPTIONAL = %w[name summary license section lib_dir executables links desktop icon min_macos].freeze
 
     # Payload selectors may name an os in addition to a family: every distro
     # family packs a linux target, so "linux:" covers deb/rpm/PKGBUILD
@@ -142,6 +142,12 @@ module Crosspack
       @data['icon']
     end
 
+    # Minimum macOS version for the .app bundle (LSMinimumSystemVersion);
+    # defaults to 11.0 in the builder.
+    def min_macos
+      @data['min_macos']
+    end
+
     private
 
     def validate
@@ -172,6 +178,7 @@ module Crosspack
       validate_string('description', nil)
       validate_string('sources', nil)
       validate_string('prefix', /\A[a-z0-9][a-z0-9+._\/-]*\z/)
+      validate_string('min_macos', /\A\d+(\.\d+)*\z/)
       validate_payload
       validate_executables
       validate_links

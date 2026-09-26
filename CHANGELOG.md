@@ -29,8 +29,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - The PKGBUILD now installs the `.desktop` file and the icon — desktop
-  integration was deb/rpm-only. The source tarball must carry the icon under
-  its own file name and the `.desktop` file as `<name>.desktop`.
+  integration was deb/rpm-only. Crosspack also builds the source tarball
+  (`<name>-<version>.tar.gz`) next to the PKGBUILD with the exact file names
+  and layout the install lines expect, so `makepkg` works out of the box —
+  and the PKGBUILD carries its real sha256 instead of `SKIP`.
+- deb/rpm packages with a `.desktop` file or a themed icon refresh the
+  application database and the hicolor icon cache (`postinst`/`postrm`,
+  `%post`/`%postun`); the tools are guarded, minimal systems without them
+  are fine.
+- Windows MSI gets an Add/Remove Programs icon (`ARPPRODUCTICON`): the
+  manifest `icon:` when it is an `.ico`, else a sibling `.ico` with the same
+  basename (`appicon.png` -> `appicon.ico`) when the build produces one.
+- `package.min_macos` sets the .app bundle's `LSMinimumSystemVersion`
+  (default stays 11.0).
+
+### Fixed
+- `.desktop` `Exec` is now an absolute path — the launcher symlink from
+  `links:` (e.g. `/usr/local/bin/h2voice`) or the executable inside
+  `lib_dir`; a bare name only resolved when `prefix/bin` happened to be in
+  PATH.
 
 [0.7.3]: https://github.com/OrelSokolov/crosspack/releases/tag/v0.7.3
 

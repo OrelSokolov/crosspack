@@ -64,9 +64,10 @@ module Crosspack
 
       # shortcuts: nil, or { name: "Display Name", target: "app.exe" } (the
       # payload file inside INSTALLFOLDER the shortcuts launch) — installs
-      # Start Menu and Desktop shortcuts.
+      # Start Menu and Desktop shortcuts. icon: local path to an .ico for
+      # the Add/Remove Programs entry (ARPPRODUCTICON), or nil.
       def self.generate_wxs(name:, version:, manufacturer:, summary:, files:,
-                            arch: 'x64', shortcuts: nil)
+                            arch: 'x64', shortcuts: nil, icon: nil)
         license_rtf_file = "#{name}-license.rtf"
         name = escape(name)
         manufacturer = escape(sanitize_manufacturer(manufacturer))
@@ -86,6 +87,7 @@ module Crosspack
         shortcut_xml = shortcuts ? shortcuts_fragment(shortcuts) : nil
         feature_refs = ["<ComponentGroupRef Id=\"Payload\" />"]
         feature_refs << '<ComponentGroupRef Id="Shortcuts" />' if shortcuts
+        arp_icon = icon ? arp_icon_fragment(icon) : nil
 
         <<~WXS
           <?xml version="1.0" encoding="UTF-8"?>
@@ -103,7 +105,7 @@ module Crosspack
 
               <Property Id="WixUILicenseRtf" Value="#{license_rtf_file}" />
               <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
-
+          #{arp_icon}
               <Feature Id="Main" Title="#{name}" Level="1">
           #{feature_refs.map { |r| "        #{r}" }.join("\n")}
               </Feature>
@@ -147,7 +149,7 @@ module Crosspack
       # the output and, when WiX is installed, builds a real MSI. Returns
       # the path of whatever was produced.
       def self.build(name:, version:, manufacturer:, summary:, files:, output:,
-                     arch: 'x64', shortcuts: nil, license: nil)
+                     arch: 'x64', shortcuts: nil, license: nil, icon: nil)
         arch = { 'x86_64' => 'x64', 'aarch64' => 'arm64' }.fetch(arch, arch)
         missing = files.reject { |src, _dst| File.file?(src) }
         unless missing.empty?
@@ -163,9 +165,11 @@ module Crosspack
         File.write(wxs_path, generate_wxs(name: name, version: version,
                                           manufacturer: manufacturer,
                                           summary: summary, files: files,
-                                          arch: arch, shortcuts: shortcuts))
+                                          arch: arch, shortcuts: shortcuts,
+                                          icon: icon))
         File.write(File.join(out_dir, "#{name}-license.rtf"),
                    license_rtf(license || summary))
+        FileUtils.cp(icon, File.join(out_dir, File.basename(icon))) if icon
 
         wix = wix_command
         unless wix
@@ -200,6 +204,14 @@ module Crosspack
         nil
       rescue Errno::ENOENT
         nil
+      end
+
+      # The Add/Remove Programs entry shows this icon (ARP/Publisher uses
+      # the MSI Icons table, not the installed files).
+      def self.arp_icon_fragment(icon)
+        icon_file = File.basename(icon)
+        "    <Property Id=\"ARPPRODUCTICON\" Value=\"AppIcon\" />\n" \
+          "    <Icon Id=\"AppIcon\" SourceFile=\"#{escape(icon_file)}\" />"
       end
 
       # The WixUI dialogs live in the UI extension, so it must be installed

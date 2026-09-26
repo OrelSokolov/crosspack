@@ -2,6 +2,8 @@
 
 require 'fileutils'
 require 'tmpdir'
+require 'open3'
+require 'digest'
 
 module Crosspack
   # Single entry point: takes a Config (the package: and deps: sections of
@@ -129,12 +131,25 @@ module Crosspack
         Type=Application
         Name=#{d['name'] || @pkg.name}
         Comment=#{d['comment'] || @pkg.summary}
-        Exec=#{d['exec'] || @pkg.name}
+        Exec=#{d['exec'] || desktop_exec}
         Icon=#{@pkg.name}
         Terminal=false
         Categories=#{categories}
       DESKTOP
       path
+    end
+
+    # Absolute launcher path: a bare name only resolves when prefix/bin is
+    # in PATH (true for usr/local, not for custom prefixes). Prefer the
+    # bin/ symlink from links:, else the executable inside lib_dir.
+    def desktop_exec
+      link = @pkg.links.keys.find { |l| l.split('/').first == 'bin' }
+      return File.join('/', @pkg.prefix, link) if link
+
+      exe = @pkg.executables.first
+      return File.join('/', @pkg.prefix, @pkg.lib_dir, exe) if exe
+
+      @pkg.name
     end
 
     def icon_source
@@ -206,12 +221,21 @@ module Crosspack
       # Same desktop integration as deb/rpm: the .desktop file and the icon
       # go to the same destinations; their sources are archive-relative
       # names (the icon under its own file name).
+      sources = @pkg.payload_for(@target).to_h { |n| [n, File.join(@pkg_data[:src_dir], n)] }
       files = @pkg.payload_for(@target).to_h { |n| [n, File.join(@pkg_data[:lib_dst], n)] }
       if @pkg.desktop
         files["#{@pkg.name}.desktop"] = File.join(@pkg.prefix, 'share', 'applications',
                                                   "#{@pkg.name}.desktop")
+        sources["#{@pkg.name}.desktop"] = desktop_entry_path
       end
-      files[File.basename(@pkg.icon)] = icon_destination if @pkg.icon
+      if @pkg.icon
+        files[File.basename(@pkg.icon)] = icon_destination
+        sources[File.basename(@pkg.icon)] = icon_source
+      end
+      sha256 = write_source_tarball(
+        File.join(File.dirname(output), "#{@pkg.name}-#{version}.tar.gz"),
+        "#{@pkg.name}-#{version}", sources
+      )
       Builders::Pkgbuild.generate(
         name: @pkg.name,
         version: version,
@@ -225,10 +249,35 @@ module Crosspack
         symlinks: @pkg_data[:symlinks],
         executables: @pkg_data[:executables],
         source: ["#{@pkg.name}-#{version}.tar.gz"],
+        sha256: sha256,
         license: @pkg.license,
         output: output
       )
       output
+    end
+
+    # makepkg needs the source archive referenced by the PKGBUILD, and it
+    # must extract into <name>-<version>/ with the exact file names the
+    # install lines use. Crosspack builds it from the staged artifacts, so
+    # the PKGBUILD works out of the box (with a real sha256 instead of
+    # SKIP). Returns the hex digest.
+    def write_source_tarball(tarball, root, sources)
+      require 'tmpdir'
+      missing = sources.values.reject { |src| File.file?(src) }
+      unless missing.empty?
+        raise BuildError, "Source files for the PKGBUILD tarball not found:\n" \
+                          "#{missing.map { |s| "  ✗ #{s}" }.join("\n")}"
+      end
+
+      FileUtils.mkdir_p(File.dirname(tarball))
+      Dir.mktmpdir('crosspack-pkgbuild') do |stage|
+        root_dir = File.join(stage, root)
+        FileUtils.mkdir_p(root_dir)
+        sources.each_value { |src| FileUtils.cp(src, File.join(root_dir, File.basename(src))) }
+        out, status = Open3.capture2e('tar', '-czf', tarball, '-C', stage, root)
+        raise BuildError, "tar failed to build #{tarball}:\n#{out}" unless status.success?
+      end
+      Digest::SHA256.file(tarball).hexdigest
     end
 
     def split_version
@@ -252,9 +301,25 @@ module Crosspack
         license: @pkg.license,
         files: files,
         shortcuts: windows_shortcuts,
+        icon: windows_arp_icon,
         arch: @target.package_arch(:winget),
         output: output
       )
+    end
+
+    # The ARP icon must be an .ico (the MSI Icons table does not take a
+    # png). The manifest icon is used when it is one; otherwise a sibling
+    # .ico with the same basename (appicon.png -> appicon.ico) is picked up
+    # when the build produces it. A png-only project gets no ARP icon — the
+    # exe icon still shows in Start Menu shortcuts.
+    def windows_arp_icon
+      return nil unless @pkg.icon
+
+      src = File.expand_path(@pkg.icon, @root)
+      return src if File.file?(src) && File.extname(src).casecmp('.ico').zero?
+
+      sibling = File.join(File.dirname(src), "#{File.basename(src, '.*')}.ico")
+      File.file?(sibling) ? sibling : nil
     end
 
     # Shortcut facts for the MSI: the display name from desktop: (falling
@@ -281,6 +346,7 @@ module Crosspack
         files: files,
         executables: @pkg.executables_for(@target),
         icon: @pkg.icon && File.expand_path(@pkg.icon, @root),
+        min_macos: @pkg.min_macos,
         output: output_dir
       )
     end

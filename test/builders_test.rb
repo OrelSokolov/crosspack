@@ -63,7 +63,9 @@ class BuildersTest < Minitest::Test
       name: 'app', version: '2026.08.31', release: '1234',
       summary: 'Test app', license: 'Proprietary',
       requires: ['webkit2gtk4.1', 'libayatana-appindicator-gtk3'],
-      files: { @bin => 'usr/local/lib/app/app' },
+      files: { @bin => 'usr/local/lib/app/app',
+               File.join(@tmpdir, 'app.desktop') => 'usr/local/share/applications/app.desktop',
+               File.join(@tmpdir, 'app.svg') => 'usr/local/share/icons/hicolor/scalable/apps/app.svg' },
       symlinks: { 'usr/local/bin/app' => '../lib/app/app' }
     )
     assert_includes spec, 'Name: app'
@@ -76,6 +78,11 @@ class BuildersTest < Minitest::Test
     assert_includes spec, '/usr/local/bin/app'
     refute_includes spec.lines, "%dir /usr\n", 'must not claim ownership of /usr'
     refute_includes spec.lines, "%dir /usr/local\n", 'must not claim ownership of /usr/local'
+    # Desktop integration caches are refreshed when .desktop/icon ship.
+    assert_includes spec, "%post\n"
+    assert_includes spec, 'update-desktop-database -q /usr/local/share/applications'
+    assert_includes spec, 'gtk-update-icon-cache -q -t -f /usr/local/share/icons/hicolor/scalable/apps'
+    assert_includes spec, "%postun\n"
   end
 
   def test_rpm_requires_rpmbuild

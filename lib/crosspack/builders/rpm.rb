@@ -29,6 +29,7 @@ module Crosspack
         description ||= summary
         requires_line = Array(requires).join(', ')
         entries = spec_entries(files: files, symlinks: symlinks)
+        scriptlets = desktop_cache_scriptlets(files)
 
         <<~SPEC
           Name: #{name}
@@ -48,10 +49,33 @@ module Crosspack
           %install
           # Files are staged into the buildroot by crosspack.
 
+          #{scriptlets}
           %files
           %defattr(-,root,root,-)
           #{entries.join("\n")}
         SPEC
+      end
+
+      # %post/%postun: refresh the application database and the hicolor icon
+      # cache when the package carries a .desktop file or a themed icon; the
+      # tools are guarded (minimal systems may lack them).
+      def self.desktop_cache_scriptlets(files)
+        commands = files.values.select { |d| d.end_with?('.desktop') }
+                        .map { |d| File.dirname(d) }.uniq
+                        .map do |dir|
+                          "command -v update-desktop-database >/dev/null 2>&1 && " \
+                          "update-desktop-database -q /#{dir} || :"
+                        end
+        commands += files.values.select { |d| d.include?('/share/icons/') }
+                         .map { |d| File.dirname(d) }.uniq
+                         .map do |dir|
+                           "command -v gtk-update-icon-cache >/dev/null 2>&1 && " \
+                           "gtk-update-icon-cache -q -t -f /#{dir} || :"
+                         end
+        return '' if commands.empty?
+
+        body = commands.join("\n")
+          "%post\n#{body}\n\n%postun\n#{body}\n\n"
       end
 
       # %files entries: %dir for every directory so we never claim ownership
