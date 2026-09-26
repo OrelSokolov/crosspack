@@ -49,7 +49,7 @@ module Crosspack
           pkgdesc='#{escaped_desc}'
           arch=(#{arch.join(' ')})
           url='#{url}'
-          license=(#{license})
+          license=('#{license}')
           depends=(#{depends_line})
           source=(#{source_line})
           sha256sums=('SKIP')

@@ -10,9 +10,11 @@ module Crosspack
     # as-is.
     class AppDir
       # files: { source_path => basename inside Contents/MacOS }
-      # executables: basenames to chmod 0755
+      # executables: basenames to chmod 0755 (the first one is the bundle's
+      #   CFBundleExecutable, falling back to the package name)
+      # icon: path to the bundle icon, copied into Contents/Resources
       def self.build(name:, version:, summary:, files:, executables: [],
-                     identifier: nil, output:)
+                     display_name: nil, icon: nil, identifier: nil, output:)
         app_dir = File.join(output, "#{name}.app")
         FileUtils.rm_rf(app_dir)
         macos_dir = File.join(app_dir, 'Contents', 'MacOS')
@@ -34,9 +36,19 @@ module Crosspack
           FileUtils.chmod(executables.include?(dst) ? 0o755 : 0o644, target)
         end
 
+        icon_file = nil
+        if icon
+          raise BuildError, "icon: file not found #{icon}" unless File.file?(icon)
+
+          icon_file = File.basename(icon)
+          FileUtils.cp(icon, File.join(resources_dir, icon_file))
+        end
+
         write_info_plist(File.join(app_dir, 'Contents', 'Info.plist'),
                          name: name, version: version, summary: summary,
-                         identifier: identifier)
+                         executable: executables.first || name,
+                         display_name: display_name || name,
+                         icon_file: icon_file, identifier: identifier)
 
         File.write(File.join(output, 'BUILD-DMG.txt'), <<~TXT)
           DMG not built: hdiutil only exists on macOS.
@@ -46,27 +58,31 @@ module Crosspack
         app_dir
       end
 
-      def self.write_info_plist(path, name:, version:, summary:, identifier: nil)
+      def self.write_info_plist(path, name:, version:, summary:, executable:,
+                                display_name:, icon_file: nil, identifier: nil)
         bundle_id = identifier || "org.crosspack.#{name}"
+        # Without the extension .icns is assumed; other formats (png) must
+        # be named in full.
+        icon_ref = icon_file.nil? ? nil : icon_file.sub(/\.icns\z/i, '')
         File.write(path, <<~PLIST)
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
             <key>CFBundleName</key>
-            <string>#{name}</string>
+            <string>#{escape(name)}</string>
             <key>CFBundleDisplayName</key>
-            <string>#{name}</string>
+            <string>#{escape(display_name)}</string>
             <key>CFBundleExecutable</key>
-            <string>#{name}</string>
+            <string>#{escape(executable)}</string>
             <key>CFBundleIdentifier</key>
-            <string>#{bundle_id}</string>
+            <string>#{escape(bundle_id)}</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleShortVersionString</key>
-            <string>#{version}</string>
+            <string>#{escape(version)}</string>
             <key>CFBundleVersion</key>
-            <string>#{version}</string>
+            <string>#{escape(version)}</string>
             <key>CFBundleInfoDictionaryVersion</key>
             <string>6.0</string>
             <key>LSMinimumSystemVersion</key>
@@ -78,10 +94,22 @@ module Crosspack
             <key>NSSupportsSuddenTermination</key>
             <false/>
             <key>NSMicrophoneUsageDescription</key>
-            <string>#{summary}</string>
+            <string>#{escape(summary)}</string>
+          #{plist_icon_entry(icon_ref)}
           </dict>
           </plist>
         PLIST
+      end
+
+      def self.plist_icon_entry(icon_ref)
+        return '' if icon_ref.nil?
+
+        "    <key>CFBundleIconFile</key>\n    <string>#{escape(icon_ref)}</string>"
+      end
+
+      # Escapes XML entities so manifest values never break the plist.
+      def self.escape(text)
+        text.to_s.gsub('&', '&amp;').gsub('<', '&lt;').gsub('>', '&gt;')
       end
     end
   end

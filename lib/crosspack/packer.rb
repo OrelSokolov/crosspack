@@ -99,10 +99,7 @@ module Crosspack
       files = @pkg.payload_for(@target).to_h { |n| [File.join(src_dir, n), File.join(lib_dst, n)] }
 
       if @pkg.icon
-        icon_src = File.expand_path(@pkg.icon, @root)
-        raise BuildError, "icon: file not found #{icon_src}" unless File.file?(icon_src)
-
-        files[icon_src] = File.join(@pkg.prefix, 'share', 'pixmaps', "#{@pkg.name}.png")
+        files[icon_source] = icon_destination
       end
 
       if @pkg.desktop
@@ -123,6 +120,10 @@ module Crosspack
       FileUtils.mkdir_p(dir)
       path = File.join(dir, "#{@pkg.name}.desktop")
       d = @pkg.desktop
+      # The spec requires each list value terminated with ";"; a manifest
+      # value like "Utility;Audio" would otherwise produce an invalid entry.
+      categories = d['categories'].to_s.empty? ? 'Utility;' : d['categories'].to_s
+      categories += ';' unless categories.end_with?(';')
       File.write(path, <<~DESKTOP)
         [Desktop Entry]
         Type=Application
@@ -131,9 +132,28 @@ module Crosspack
         Exec=#{d['exec'] || @pkg.name}
         Icon=#{@pkg.name}
         Terminal=false
-        Categories=#{d['categories'] || 'Utility;'}
+        Categories=#{categories}
       DESKTOP
       path
+    end
+
+    def icon_source
+      src = File.expand_path(@pkg.icon, @root)
+      raise BuildError, "icon: file not found #{src}" unless File.file?(src)
+
+      src
+    end
+
+    # Desktop icon lookup keeps the real extension: PNG/XPM go to the
+    # classic pixmaps dir, SVG needs the hicolor scalable theme dir (a .svg
+    # named .png in pixmaps is never found).
+    def icon_destination
+      ext = File.extname(@pkg.icon).downcase
+      if ext == '.svg'
+        File.join(@pkg.prefix, 'share', 'icons', 'hicolor', 'scalable', 'apps', "#{@pkg.name}#{ext}")
+      else
+        File.join(@pkg.prefix, 'share', 'pixmaps', "#{@pkg.name}#{ext}")
+      end
     end
 
     def resolved_depends(format)
@@ -173,7 +193,7 @@ module Crosspack
         files: @pkg_data[:files],
         symlinks: @pkg_data[:symlinks],
         executables: @pkg_data[:executables],
-        description: @pkg.summary,
+        description: @pkg.description,
         arch: @target.package_arch(:rpm),
         output: output
       )
@@ -183,6 +203,15 @@ module Crosspack
     def pack_pkgbuild
       version, release = split_version
       output = File.join(@target.output_dir(@output_base, :pkgbuild), 'PKGBUILD')
+      # Same desktop integration as deb/rpm: the .desktop file and the icon
+      # go to the same destinations; their sources are archive-relative
+      # names (the icon under its own file name).
+      files = @pkg.payload_for(@target).to_h { |n| [n, File.join(@pkg_data[:lib_dst], n)] }
+      if @pkg.desktop
+        files["#{@pkg.name}.desktop"] = File.join(@pkg.prefix, 'share', 'applications',
+                                                  "#{@pkg.name}.desktop")
+      end
+      files[File.basename(@pkg.icon)] = icon_destination if @pkg.icon
       Builders::Pkgbuild.generate(
         name: @pkg.name,
         version: version,
@@ -192,7 +221,7 @@ module Crosspack
         depends: resolved_depends(:pkgbuild),
         arch: [@target.package_arch(:pkgbuild)],
         # PKGBUILD sources are archive-relative names, not local paths.
-        files: @pkg.payload_for(@target).to_h { |n| [n, File.join(@pkg_data[:lib_dst], n)] },
+        files: files,
         symlinks: @pkg_data[:symlinks],
         executables: @pkg_data[:executables],
         source: ["#{@pkg.name}-#{version}.tar.gz"],
@@ -210,6 +239,7 @@ module Crosspack
 
     # Windows: flat payload under Program Files/<name>/ via WiX. Unix symlinks
     # do not apply; everything from `sources` goes in as regular files.
+    # desktop:/executables: drive the Start Menu / Desktop shortcuts.
     def pack_windows
       output = File.join(@target.output_dir(@output_base, :winget),
                          "#{@pkg.name}-#{Builders::Wix.msi_version(@version)}.msi")
@@ -219,22 +249,38 @@ module Crosspack
         version: @version,
         manufacturer: @pkg.maintainer,
         summary: @pkg.summary,
+        license: @pkg.license,
         files: files,
+        shortcuts: windows_shortcuts,
         arch: @target.package_arch(:winget),
         output: output
       )
     end
 
+    # Shortcut facts for the MSI: the display name from desktop: (falling
+    # back to the package name) and the first executable as the target.
+    def windows_shortcuts
+      target = @pkg.executables_for(@target).first
+      return nil if target.nil?
+
+      { name: (@pkg.desktop && @pkg.desktop['name']) || @pkg.name,
+        target: target }
+    end
+
     # macOS: .app bundle staging; DMG itself requires a Mac (hdiutil).
+    # desktop.name becomes the display name; the manifest icon lands in
+    # Contents/Resources (CFBundleIconFile).
     def pack_macos
       output_dir = @target.output_dir(@output_base, :cask)
       files = @pkg.payload_for(@target).to_h { |n| [File.join(@pkg_data[:src_dir], n), n] }
       Builders::AppDir.build(
         name: @pkg.name,
+        display_name: (@pkg.desktop && @pkg.desktop['name']) || @pkg.name,
         version: @version,
         summary: @pkg.summary,
         files: files,
         executables: @pkg.executables_for(@target),
+        icon: @pkg.icon && File.expand_path(@pkg.icon, @root),
         output: output_dir
       )
     end

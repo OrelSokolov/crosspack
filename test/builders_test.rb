@@ -112,4 +112,37 @@ class BuildersTest < Minitest::Test
     assert_includes content, 'install -Dm644'
     assert_includes content, 'ln -s ../lib/app/app "$pkgdir/usr/local/bin/app"'
   end
+
+  def test_wix_msi_version_maps_calver_and_keeps_short_versions
+    # calver year >= 256 would trip WIX1148; leading zeros are dropped.
+    assert_equal '26.9.26', Crosspack::Builders::Wix.msi_version('2026.09.26')
+    assert_equal '26.8.31', Crosspack::Builders::Wix.msi_version('2026.08.31-1234')
+    assert_equal '1.0.0', Crosspack::Builders::Wix.msi_version('1.0')
+    assert_equal '1.2.3', Crosspack::Builders::Wix.msi_version('1.2.3')
+  end
+
+  def test_wix_generate_wxs_without_shortcuts
+    wxs = Crosspack::Builders::Wix.generate_wxs(
+      name: 'app', version: '2026.09.26', manufacturer: 'Test <t@example.com>',
+      summary: 'Test app', files: { @bin => 'app' }
+    )
+    assert_includes wxs, 'Version="26.9.26"'
+    assert_includes wxs, 'Manufacturer="Test"'
+    refute_includes wxs, 'Id="Shortcuts"'
+    refute_includes wxs, '<Shortcut'
+    assert_includes wxs, '<ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />'
+  end
+
+  def test_wix_sanitize_manufacturer_strips_deb_style_email
+    assert_equal 'Oleg Orlov', Crosspack::Builders::Wix.sanitize_manufacturer('Oleg Orlov <o@example.com>')
+    assert_equal 'someone@example.com',
+                 Crosspack::Builders::Wix.sanitize_manufacturer('<someone@example.com>')
+  end
+
+  def test_wix_license_rtf_is_valid_rtf
+    rtf = Crosspack::Builders::Wix.license_rtf("Proprietary\nSecond line")
+    assert rtf.start_with?('{\\rtf1')
+    assert_includes rtf, 'Proprietary\\par'
+    assert_includes rtf, 'Second line'
+  end
 end

@@ -2,6 +2,7 @@
 
 require_relative 'test_helper'
 require 'open3'
+require 'tmpdir'
 
 class PackerTest < Minitest::Test
   def setup
@@ -38,6 +39,7 @@ class PackerTest < Minitest::Test
         desktop:
           name: App
           comment: Test comment
+          categories: Utility;Audio
         icon: build/icon.png
       deps:
         webkit2gtk:
@@ -83,6 +85,30 @@ class PackerTest < Minitest::Test
     assert_includes listing, 'usr/local/bin/app'
     assert_includes listing, 'usr/local/share/applications/app.desktop'
     assert_includes listing, 'usr/local/share/pixmaps/app.png'
+
+    # The staged .desktop is spec-conformant: every Categories value is
+    # terminated with ";" (the manifest says "Utility;Audio").
+    Dir.mktmpdir do |x|
+      Open3.capture2e('dpkg-deb', '-x', path, x)
+      entry = File.read(File.join(x, 'usr/local/share/applications/app.desktop'))
+      assert_includes entry, 'Categories=Utility;Audio;'
+      assert_includes entry, 'Icon=app'
+      assert_includes entry, 'Name=App'
+    end
+  end
+
+  def test_pack_deb_svg_icon_goes_to_hicolor
+    File.write(File.join(@root, 'build', 'icon.svg'), '<svg/>')
+    yml = File.read(File.join(@root, 'crosspack.yml')).sub('icon: build/icon.png',
+                                                           'icon: build/icon.svg')
+    File.write(File.join(@root, 'crosspack.yml'), yml)
+
+    path = pack('debian-12')
+    listing, = Open3.capture2e('dpkg-deb', '-c', path)
+    # An SVG named .png in pixmaps would never be found; it belongs to the
+    # hicolor scalable theme dir.
+    assert_includes listing, 'usr/local/share/icons/hicolor/scalable/apps/app.svg'
+    refute_includes listing, 'pixmaps'
   end
 
   def test_pack_pkgbuild
@@ -97,6 +123,13 @@ class PackerTest < Minitest::Test
     assert_includes content, 'pkgrel=1234'
     assert_includes content, "'webkit2gtk-4.1'"
     assert_includes content, 'ln -s ../lib/app/app "$pkgdir/usr/local/bin/app"'
+    # Desktop integration must not be deb/rpm-only: the .desktop file and
+    # the icon are installed on arch too.
+    assert_includes content,
+                     'install -Dm644 "$srcdir/$pkgname-$pkgver/app.desktop" "$pkgdir/usr/local/share/applications/app.desktop"'
+    assert_includes content,
+                     'install -Dm644 "$srcdir/$pkgname-$pkgver/icon.png" "$pkgdir/usr/local/share/pixmaps/app.png"'
+    assert_includes content, "license=('Proprietary')"
   end
 
   def test_pack_missing_build_dir_gives_actionable_error
@@ -168,12 +201,29 @@ class PackerTest < Minitest::Test
     assert_includes path, File.join('crosspacks', 'windows', '11.0', 'x86_64')
 
     content = File.read(path)
-    assert_includes content, '<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">'
+    assert_includes content, '<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"'
+    assert_includes content, 'xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"'
     assert_includes content, 'Name="app"'
     assert_includes content, 'ProgramFiles64Folder'
     assert_includes content, 'Source='
-    # Maintainer with "Name <email>" must be XML-escaped, not inlined raw.
-    assert_includes content, 'Manufacturer="Test &lt;t@example.com&gt;"'
+    # The directory Id must be INSTALLFOLDER (anything else makes WiX add a
+    # phantom "[Manufacturer] [ProductName]" directory, error 1324 on install).
+    assert_includes content, '<Directory Id="INSTALLFOLDER" Name="app" />'
+    refute_includes content, 'Id="INSTALLDIR"'
+    # Maintainer keeps only the name half: the deb-style "<email>" must not
+    # reach the MSI Manufacturer property.
+    assert_includes content, 'Manufacturer="Test"'
+    refute_includes content, '<t@example.com>'
+    # Install wizard (WixUI_InstallDir) + its license file.
+    assert_includes content, '<Property Id="WixUILicenseRtf" Value="app-license.rtf" />'
+    assert_includes content, '<ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />'
+    assert File.file?(File.join(File.dirname(path), 'app-license.rtf'))
+    # Start Menu / Desktop shortcuts from desktop:/executables:.
+    assert_includes content, 'Id="StartMenuShortcut" Directory="ProgramMenuFolder"'
+    assert_includes content, 'Id="DesktopShortcut" Directory="DesktopFolder"'
+    assert_includes content, 'Name="App" Target="[INSTALLFOLDER]app"'
+    assert_includes content, '<RegistryValue Root="HKLM" Key="Software\App"'
+    assert_includes content, 'KeyPath="yes"'
     assert File.file?(File.join(File.dirname(path), 'BUILD-MSI.txt'))
   end
 
@@ -214,6 +264,8 @@ class PackerTest < Minitest::Test
     assert_includes content, 'app.exe'
     assert_includes content, 'onnxruntime.dll'
     assert_includes content, 'model.onnx'
+    # Shortcuts resolve through the payload map too: app -> app.exe.
+    assert_includes content, 'Target="[INSTALLFOLDER]app.exe"'
     # The unix name must not leak into the Windows payload.
     refute_includes content, 'x86_64\\app"'
   end
@@ -232,5 +284,12 @@ class PackerTest < Minitest::Test
     plist = File.read(File.join(path, 'Contents', 'Info.plist'))
     assert_includes plist, '<key>CFBundleExecutable</key>'
     assert_includes plist, '<string>app</string>'
+    # Display name from desktop:, icon from the manifest, no raw &/<>& in
+    # the XML.
+    assert_includes plist, '<key>CFBundleDisplayName</key>'
+    assert_includes plist, '<string>App</string>'
+    assert_includes plist, '<key>CFBundleIconFile</key>'
+    assert_includes plist, '<string>icon.png</string>'
+    assert File.file?(File.join(path, 'Contents', 'Resources', 'icon.png'))
   end
 end

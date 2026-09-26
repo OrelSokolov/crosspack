@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-09-26
+
+### Fixed
+- The manifest icon keeps its real extension everywhere: an SVG now installs
+  to `share/icons/hicolor/scalable/apps/<name>.svg` (it was forced to
+  `share/pixmaps/<name>.png`, where desktops never found it); PNG/XPM keep
+  going to pixmaps.
+- `.desktop` `Categories` values are terminated with `;` per the spec — a
+  manifest value like `Utility;Audio` produced an invalid entry GNOME could
+  refuse to show.
+- macOS `Info.plist` escapes XML entities (`&`/`<` in the summary no longer
+  corrupt the plist), `CFBundleExecutable` is the first `package.executables`
+  entry (not the package name) and the bundle icon from `icon:` is copied to
+  `Contents/Resources` and referenced via `CFBundleIconFile`.
+- RPM `%description` carries the full package description, not just the
+  summary line.
+- PKGBUILD quotes the `license` value (a license with spaces broke the
+  generated bash).
+- deb omits an empty `Depends:` field instead of writing an invalid one.
+- WiX `Source` paths are XML-escaped (`&` in a path no longer breaks the
+  generated `.wxs`).
+
+### Added
+- The PKGBUILD now installs the `.desktop` file and the icon — desktop
+  integration was deb/rpm-only. The source tarball must carry the icon under
+  its own file name and the `.desktop` file as `<name>.desktop`.
+
+[0.7.3]: https://github.com/OrelSokolov/crosspack/releases/tag/v0.7.3
+
+## [0.7.2] - 2026-09-26
+
+### Fixed
+- Windows MSI no longer fails to install with error 1324: the payload
+  directory is now `INSTALLFOLDER` (WiX v4+ treats any other Id as "author
+  did not define it" and injects a phantom `[Manufacturer] [ProductName]`
+  directory). The deb-style `Name <email>` maintainer is sanitized to the
+  name half before it reaches the MSI Manufacturer property.
+- calver versions (e.g. `2026.09.26`) map to a valid MSI ProductVersion
+  (`26.9.26`) in the `Package@Version` attribute too, not just the file
+  name — a major >= 256 tripped WIX1148.
+
+### Added
+- The Windows MSI now has a standard install wizard (`ui:WixUI
+  WixUI_InstallDir` with the license dialog): crosspack generates the
+  license `.rtf` and builds with `-ext WixToolset.UI.wixext`, installing the
+  UI extension itself when missing (`WixToolset.UI.wixext/6.0.1` on WiX 6).
+- Start Menu and Desktop shortcuts for the first `package.executables`
+  entry; the display name comes from `package.desktop.name` (falling back
+  to the package name). Previously the winget target ignored `desktop:`.
+
+[0.7.2]: https://github.com/OrelSokolov/crosspack/releases/tag/v0.7.2
+
 ## [0.7.0] - 2026-09-13
 
 ### Added

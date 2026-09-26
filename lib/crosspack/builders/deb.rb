@@ -104,17 +104,13 @@ module Crosspack
         summary = description_lines.shift || @name
         body = description_lines.map { |l| " #{l}" }
 
-        File.write(File.join(debian_dir, 'control'), <<~CONTROL)
-          Package: #{@name}
-          Version: #{@version}
-          Section: #{@section}
-          Priority: #{@priority}
-          Architecture: #{@architecture}
-          Maintainer: #{@maintainer}
-          Depends: #{@depends}
-          Description: #{summary}
-          #{body.join("\n")}
-        CONTROL
+        fields = ["Package: #{@name}", "Version: #{@version}", "Section: #{@section}",
+                  "Priority: #{@priority}", "Architecture: #{@architecture}",
+                  "Maintainer: #{@maintainer}"]
+        # An empty Depends: field is invalid; omit it instead.
+        fields << "Depends: #{@depends}" unless @depends.to_s.strip.empty?
+        File.write(File.join(debian_dir, 'control'),
+                   "#{(fields + ["Description: #{summary}"]).join("\n")}\n#{body.join("\n")}\n")
       end
     end
   end
