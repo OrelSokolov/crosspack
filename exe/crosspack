@@ -46,9 +46,9 @@ parser = OptionParser.new do |opts|
   opts.banner = "crosspack #{Crosspack::VERSION} — staged pipeline: deps → build → pack\n" \
                 "Usage: crosspack <command> [options]\n" \
                 "Stages:   deps [<target>] [--check]      verify/install build deps (default: this host)\n" \
-                "          build [<target>]|--all          compile into builds/ (default: this host)\n" \
+                "          build [<goal>|all] [--no-deps] compile into builds/ (default goal: default)\n" \
                 "          pack [<target>] [--version X]   package builds/<target> (default: this host; version from the build stamp)\n" \
-                "Host:     run [-- <app args>]            build for this host, then launch the main binary\n" \
+                "Host:     run [<goal>] [-- <app args>]   build the goal (default: default), then launch the main binary\n" \
                 "          install                         launch this host's package with its installer\n" \
                 'Commands: validate, resolve, matrix, version, targets'
 
@@ -60,7 +60,7 @@ parser = OptionParser.new do |opts|
   opts.on('--output-base DIR', 'output directory (build stage: the manifest output, default builds; pack: default ./crosspacks)') { |v| options[:output_base] = v }
   opts.on('--check', 'with `deps`: only report presence, never install (exit 1 if missing)') { options[:check_only] = true }
   opts.on('--no-deps', 'with `build`: skip the deps stage') { options[:no_deps] = true }
-  opts.on('--all', 'with `build`: every host-buildable matrix entry (default target selection off)') { options[:all] = true }
+  opts.on('--all', 'with `build`: every host-buildable matrix entry (same as: build all)') { options[:all] = true }
   opts.on('-h', '--help', 'show help') do
     puts opts
     exit
@@ -75,8 +75,8 @@ end
 command = ARGV.shift
 abort_with 'No command given. See: crosspack --help' if command.nil?
 
-# Positional argument: a target for the stage commands (deps/build/pack,
-# resolve), a crosspack.yml path for validate.
+# Positional argument: a build goal for build/run, a package target for
+# deps/pack/resolve, a crosspack.yml path for validate.
 positional = ARGV.shift if ARGV.first && !ARGV.first.start_with?('-')
 
 options[:file] = positional if command == 'validate' && positional
@@ -108,7 +108,7 @@ rescue Crossbuild::Error => e
   abort_with e.message
 end
 
-# Stage commands (deps/build/pack) run for the current host when no target
+# Stage commands (deps/pack) run for the current host when no target
 # is given: macos, windows-11.0 or the distro from /etc/os-release.
 def host_target!(command)
   raw = Crosspack::Target.host_string
@@ -192,17 +192,31 @@ when 'deps'
 when 'build'
   build_manifest = config.build_manifest
   abort_with 'the build: section is invalid — run: crosspack validate' unless build_manifest.valid?
-  if options[:all]
-    target = nil
-  else
-    target = positional || host_target!('build')
+  # Positional: a build goal — empty/`default` (the implicit default goal),
+  # `all` (every host-buildable entry), a declared goal name or an entry id
+  # (make-style binary goal: crosspack build helloworld). Anything else
+  # falls back to the legacy package target (crosspack build debian-12).
+  arg = positional.to_s
+  goal = 'default'
+  target = nil
+  if options[:all] || arg == 'all'
+    goal = 'all'
+  elsif !arg.empty? && arg != 'default'
+    known_goal = build_manifest.declared_goals.include?(arg) || build_manifest.find_entry(arg)
+    goal = known_goal ? arg : nil
+    target = arg if goal.nil?
   end
   begin
     result = Crossbuild::Builder.new(build_manifest, root: options[:root],
                                       output_base: options[:output_base], version: options[:version],
-                                      deps: !options[:no_deps]).run(target: target)
+                                      deps: !options[:no_deps]).run(goal: goal, target: target)
   rescue Crossbuild::Error, Crosspack::InvalidManifestError => e
-    abort_with e.message
+    message = e.message
+    if target
+      selectors = (build_manifest.declared_goals | build_manifest.entries.map(&:id)).sort
+      message += "\nNot a package target either — buildable selectors: #{selectors.join(', ')} (plus 'all')"
+    end
+    abort_with message
   end
   puts Crosspack::Colors.green("\n📦 #{result.entries.size} entr#{result.entries.size == 1 ? 'y' : 'ies'} built, version #{result.version}")
   puts 'Pack with: crosspack pack <target>'
@@ -224,19 +238,23 @@ when 'pack'
   end
   puts Crosspack::Colors.green("📦 #{path}")
 when 'run', 'install'
-  # Host-only commands: no target argument; anything after `--` goes to the
-  # launched process (crosspack run -- --dev).
-  if positional
-    abort_with "crosspack #{command} works only for the current host — no target argument " \
-               "(other targets make no sense here)"
-  end
+  # Host-only commands: everything after `--` goes to the launched process
+  # (crosspack run -- --dev). `run` optionally takes a build goal; `install`
+  # never builds, so it takes no arguments.
   args = ARGV.dup
   args.shift if args.first == '--'
+  goal = 'default'
+  if command == 'run'
+    goal = positional if positional && !positional.empty?
+  elsif positional
+    abort_with "crosspack install launches this host's package — no arguments " \
+               '(crosspack run [goal] is the one that builds)'
+  end
   begin
     status =
       if command == 'run'
         Crosspack::Launcher.run(
-          config, root: options[:root], args: args,
+          config, root: options[:root], args: args, goal: goal,
           output_base: options[:output_base], version: options[:version], deps: !options[:no_deps]
         )
       else

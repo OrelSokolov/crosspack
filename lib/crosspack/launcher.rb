@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 
 module Crosspack
-  # Host-only launch commands: `crosspack run` (build the host target, then
-  # launch the application's main binary) and `crosspack install` (launch the
-  # package packed for this host). Both resolve the current host target, so
-  # they take no target argument and are meaningless on any other system.
+  # Host-only launch commands: `crosspack run [goal]` (build the goal's
+  # host-buildable entries — default goal: `default` —, then launch the
+  # application's main binary) and `crosspack install` (launch the package
+  # packed for this host). Both resolve the current host target, so they
+  # take no package-target argument and are meaningless on any other system.
   #
   # Commands may be overridden per host in crosspack.yml (run:/install:
   # sections, selectors like the deps: rules of build:); placeholders:
@@ -15,11 +16,14 @@ module Crosspack
   class Launcher
     class Error < BuildError; end
 
-    # Builds the host target first (the same stage `crosspack build` runs),
-    # then launches the first package.executables binary from builds/.
+    # Builds the given goal's host-buildable entries first (the same stage
+    # `crosspack build <goal>` runs; default goal: `default`), then launches
+    # a package.executables binary from builds/ — the one named by the goal
+    # when it matches, otherwise the first.
     # Returns the launched process's exit code.
     def self.run(config, root: Dir.pwd, args: [], output_base: nil, version: nil,
-                 deps: true, host_string: nil, host_os: Crossbuild::Platform.os,
+                 deps: true, goal: Crossbuild::BuildManifest::DEFAULT_GOAL, host_string: nil,
+                 host_os: Crossbuild::Platform.os,
                  host_arch: Crossbuild::Platform.arch, selectors: Crossbuild::Platform.selectors)
       config = Config.coerce(config, root: root)
       target = host_target('run', host_string, host_arch)
@@ -30,9 +34,12 @@ module Crosspack
       Crossbuild::Builder.new(build_manifest, root: root, output_base: output_base,
                                             version: version, deps: deps,
                                             host_os: host_os, host_arch: host_arch)
-                         .run(target: target.to_s)
+                         .run(goal: goal)
 
-      exe = pkg.executables_for(target).first
+      # A binary goal (`crosspack run helloworld`) launches that executable;
+      # a group goal or the default goal launches the first one.
+      executables = pkg.executables_for(target)
+      exe = executables.include?(goal) ? goal : executables.first
       if exe.nil?
         raise Error,
               'run: the package: section does not name the binary to launch — ' \

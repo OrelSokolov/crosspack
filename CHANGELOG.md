@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-09-27
+
+### Added
+- Make-style build goals: a matrix entry may declare `goals:` and its `id`
+  doubles as a goal name, so a per-binary entry works with no extra syntax.
+  `crosspack build` compiles only the `default` goal's entries,
+  `crosspack build all` every host-buildable entry, `crosspack build
+  <goal>` one goal or binary (`crosspack build helloworld` rebuilds nothing
+  else). `crosspack run [goal]` builds just that goal before launching, and
+  launches the executable named by a binary goal instead of the first one;
+  `crosspack build <package-target>` (e.g. `debian-12`) still works when
+  the name is not a goal or entry id. `crosspack matrix` and
+  `crosspack validate` list each entry's goals.
+
+[0.8.0]: https://github.com/OrelSokolov/crosspack/releases/tag/v0.8.0
+
 ## [0.7.3] - 2026-09-26
 
 ### Fixed

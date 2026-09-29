@@ -182,7 +182,7 @@ class BuildManifestTest < Minitest::Test
 
   def test_error_report_valid_form
     m = load_manifest(VALID)
-    assert_includes m.error_report, 'the build: section is valid (2 entries: linux/amd64, windows)'
+    assert_includes m.error_report, 'the build: section is valid (2 entries: linux/amd64, windows; goals: default)'
   end
 
   def test_buildable_entries_and_find
@@ -199,6 +199,51 @@ class BuildManifestTest < Minitest::Test
     assert m.valid?
     assert_equal ['darwin/amd64'], m.buildable_entries(:darwin, :x86_64).map(&:id)
     assert_equal ['darwin/amd64'], m.buildable_entries(:darwin, :arm64).map(&:id)
+  end
+
+  def test_goals_default_to_default_goal
+    m = load_manifest("name: app\nmatrix:\n  - build: linux/amd64\n    steps: ['true']\n")
+    assert m.valid?, m.errors.map(&:to_s).join('; ')
+    assert_equal ['default'], m.entries.first.goals
+    assert_equal ['default'], m.declared_goals
+  end
+
+  def test_goals_parse_and_select_entries
+    m = load_manifest(<<~YAML)
+      name: app
+      matrix:
+        - id: main
+          build: linux/amd64
+          goals: [default, app]
+          steps: ['true']
+        - id: tools
+          build: linux/amd64
+          goals: [tools]
+          steps: ['true']
+    YAML
+    assert m.valid?, m.errors.map(&:to_s).join('; ')
+    assert_equal %w[app default tools], m.declared_goals
+    assert_equal ['main'], m.entries_for_goal('default').map(&:id)
+    assert_equal ['main'], m.entries_for_goal('app').map(&:id)
+    assert_equal ['tools'], m.entries_for_goal('tools').map(&:id)
+  end
+
+  def test_goals_reject_reserved_all
+    m = load_manifest("name: app\nmatrix:\n  - build: linux/amd64\n    goals: [all]\n    steps: ['true']\n")
+    refute m.valid?
+    assert(m.errors.any? { |e| e.path == 'matrix[0].goals' && e.message.include?('reserved') })
+  end
+
+  def test_goals_must_be_a_list_of_names
+    m = load_manifest("name: app\nmatrix:\n  - build: linux/amd64\n    goals: app\n    steps: ['true']\n")
+    refute m.valid?
+    assert(m.errors.any? { |e| e.path == 'matrix[0].goals' && e.message.include?('non-empty list') })
+  end
+
+  def test_goals_reject_invalid_names_and_duplicates
+    m = load_manifest("name: app\nmatrix:\n  - build: linux/amd64\n    goals: [tools, tools]\n    steps: ['true']\n")
+    refute m.valid?
+    assert(m.errors.any? { |e| e.path == 'matrix[0].goals' && e.message.include?('duplicate') })
   end
 
   def test_deps_section_parses_into_dependencies

@@ -11,16 +11,19 @@ shipped as one gem, one command, one config file and a staged pipeline:
 
 ```
 crosspack deps <target>     # verify/install the build host's dependencies
-crosspack build <target>    # compile the target's matrix entry into builds/
+crosspack build [<goal>]    # compile a build goal's matrix entries into builds/
 crosspack pack <target>     # package builds/<target> as a native package
 ```
 
-Every stage is keyed by the same target vocabulary — `debian-12`,
-`ubuntu-24.04`, `fedora-41`, `arch`, `macos`, `windows-11.0` — and gated by
-the previous one: `build` refuses to start before the deps stage passes, and
-`pack` refuses to run before `build` filled `builds/<target>/`. The build
-stage also stamps the version into the tree, so `pack` normally needs no
-`--version`:
+The build stage is keyed by **goals** (make-style targets): `crosspack build`
+runs only the `default` goal, `crosspack build all` every goal and
+`crosspack build <goal>` one named goal — unrelated binaries are never
+rebuilt together. The deps and pack stages are keyed by the target
+vocabulary — `debian-12`, `ubuntu-24.04`, `fedora-41`, `arch`, `macos`,
+`windows-11.0` — and gated by the previous one: `build` refuses to start
+before the deps stage passes, and `pack` refuses to run before `build`
+filled `builds/<target>/`. The build stage also stamps the version into the
+tree, so `pack` normally needs no `--version`:
 
 ```
 crosspack deps ubuntu-24.04
@@ -36,6 +39,50 @@ token):
 ```
 crosspack deps && crosspack build && crosspack pack
 ```
+
+## Build goals
+
+Build goals are make-style targets — usually one binary each. A matrix entry
+is one goal's recipe; the entry `id` doubles as the goal name, so a
+per-binary entry needs no extra syntax. `goals:` regroups entries when one
+goal should cover several (an entry without `goals:` belongs to the implicit
+`default` goal; one entry may serve several goals):
+
+```yaml
+build:
+  matrix:
+    - id: helloworld        # goal name = entry id
+      build: linux/amd64
+      steps: [go build -o build/bin/helloworld ./cmd/helloworld]
+      artifacts: { from: build/bin, include: [helloworld], to: [ubuntu-24.04] }
+    - id: main
+      build: linux/amd64
+      goals: [default, app] # what `crosspack build` runs; also buildable as `app`
+      steps: [wails build -platform linux/amd64]
+      artifacts: { from: build/bin, to: [ubuntu-24.04, debian-12] }
+    - id: tools
+      build: linux/amd64
+      goals: [tools]
+      steps: [cargo build --release -p helper]
+```
+
+```
+crosspack build            # the default goal only (same as: build default)
+crosspack build helloworld # one binary — nothing else rebuilds
+crosspack build tools      # one named goal
+crosspack build all        # every host-buildable entry (--all works too)
+crosspack run helloworld   # build just that binary, then launch it
+crosspack run              # build the default goal, launch the first executable
+```
+
+`crosspack run <binary>` launches the executable named by the goal (it must
+be listed in `package.executables`); group goals and the default goal launch
+the first one. Goal names use letters/digits/`+._-`; `all` is reserved. A
+positional that is not a declared goal or entry id still works as a package
+target (`crosspack build debian-12` — the single entry distributing to it,
+with fanout limited to that target), so old invocations keep working.
+`crosspack matrix` lists each entry's goals and what the default goal would
+run on this host.
 
 ## crosspack.yml — one file, three sections + two host hooks
 
@@ -71,6 +118,7 @@ build:
 
   matrix:
     - build: linux/amd64   # os/arch this entry builds on (arch may be "any")
+      goals: [default]     # build goals this entry belongs to (default: [default])
       env:                 # extra env for the steps of this entry
         CGO_ENABLED: "1"
       steps:               # shell commands, run from the project root
@@ -205,11 +253,12 @@ config.
 ```
 # staged pipeline
 crosspack deps <target> [--check]        # verify/install build deps (--check: report only)
-crosspack build <target>|--all [--no-deps] [--version X]
+crosspack build [<goal>|all] [--no-deps] [--version X]
+                                         # goal: default (implicit), a declared goal, or all
 crosspack pack <target> [--version X]    # version defaults to the build stamp
 
-# host-only: this machine, no target argument
-crosspack run [-- --dev]                 # build for this host, then launch the main binary
+# host-only: this machine, no package-target argument
+crosspack run [<goal>] [-- --dev]        # build the goal (default: default), then launch the main binary
 crosspack install                        # launch this host's package with its installer
 
 # inspection
@@ -235,10 +284,11 @@ crosspacks/arch/x86_64/PKGBUILD
 ### Host-only commands: run and install
 
 `run` and `install` apply to the current host only — the build target *is*
-the run target, so they take no target argument. `crosspack run` runs the
-build stage for this host (same as `crosspack build <host target>`), then
-launches the first `package.executables` binary straight from `builds/` —
-the binary, not the package. Everything after `--` goes to the app:
+the run target, so they take no package-target argument. `crosspack run
+[goal]` runs the build stage for the given goal (default: `default` — same
+as `crosspack build <goal>`), then launches the first `package.executables`
+binary straight from `builds/` — the binary, not the package; only that
+goal's entries are rebuilt. Everything after `--` goes to the app:
 
 ```
 crosspack run -- --dev
@@ -264,7 +314,8 @@ executed directly, except a macOS `.app` bundle which is `open`ed.
 require 'crosspack'   # pulls in Crossbuild too
 
 Crossbuild.build('crosspack.yml', root: Dir.pwd)            # all host entries
-Crossbuild.build('crosspack.yml', target: 'ubuntu-24.04')   # the stages' build, library-level
+Crossbuild.build('crosspack.yml', goal: 'default')          # one build goal
+Crossbuild.build('crosspack.yml', target: 'ubuntu-24.04')   # legacy target selection
 
 Crosspack.pack(
   config: 'crosspack.yml',

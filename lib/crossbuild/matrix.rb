@@ -22,6 +22,10 @@ module Crossbuild
                else
                  "\n#{buildable.size} of #{@manifest.entries.size} entries build here: #{buildable.map(&:id).join(', ')}"
                end
+      default_here = buildable.select { |e| e.goals.include?('default') }
+      unless default_here.empty?
+        lines << "`crosspack build` (default goal) would run: #{default_here.map(&:id).join(', ')}"
+      end
       lines << render_deps
       lines.join("\n")
     end
@@ -42,6 +46,7 @@ module Crossbuild
                else
                  "#{entry.steps.size} step#{'s' unless entry.steps.size == 1}"
                end
+      parts << "goals: #{entry.goals.join(', ')}" unless entry.goals == ['default']
       parts << artifact_note(entry) if entry.artifacts
       parts.join('  ')
     end

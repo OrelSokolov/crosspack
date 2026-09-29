@@ -19,17 +19,19 @@ module Crossbuild
       @host_arch = host_arch
     end
 
-    # entry_id: nil — every entry buildable on this host; otherwise the exact
-    # entry id (which must exist, but may target another host — the user
-    # asked for it explicitly).
+    # entry_id: nil — otherwise the exact entry id (which must exist, but may
+    # target another host — the user asked for it explicitly).
     # target: a raw target string (e.g. "ubuntu-24.04") — builds the single
     # matrix entry distributing to it and fans artifacts out to that target
     # only; the entry must be buildable on this host (no cross-compilation).
-    def run(entry_id: nil, target: nil)
+    # goal: nil/'all' — every entry buildable on this host; otherwise the
+    # entries declaring that build goal (entries without `goals:` belong to
+    # the implicit `default` goal).
+    def run(entry_id: nil, target: nil, goal: nil)
       manifest.validate!
       ensure_deps
       version = @version_override || VersionScheme.new(manifest.version).compute(root: @root)
-      entries = target ? entries_for_target(target) : select_entries(entry_id)
+      entries = target ? entries_for_target(target) : select_entries(entry_id, goal)
 
       entries.each do |entry|
         puts "\n==> #{manifest.name} [#{entry.id}] version #{version}"
@@ -60,18 +62,52 @@ module Crossbuild
       [entry]
     end
 
-    def select_entries(entry_id)
+    def select_entries(entry_id, goal)
       if entry_id
         entry = manifest.find_entry(entry_id)
         raise Error, "unknown matrix entry #{entry_id.inspect}; available: #{manifest.entries.map(&:id).join(', ')}" unless entry
 
         [entry]
+      elsif goal.nil? || goal == BuildManifest::ALL_GOAL
+        buildable_on_host
       else
-        buildable = manifest.buildable_entries(@host_os, @host_arch)
-        raise Error, "nothing to build on #{@host_os}/#{Platform.display_arch(@host_arch)} " \
-                     "(matrix entries: #{manifest.entries.map(&:id).join(', ')})" if buildable.empty?
+        entries_for_goal(goal)
+      end
+    end
+
+    def buildable_on_host
+      buildable = manifest.buildable_entries(@host_os, @host_arch)
+      raise Error, "nothing to build on #{@host_os}/#{Platform.display_arch(@host_arch)} " \
+                   "(matrix entries: #{manifest.entries.map(&:id).join(', ')})" if buildable.empty?
+
+      buildable
+    end
+
+    # A goal name may also be an entry id — `crosspack build helloworld`
+    # builds just the entry named helloworld (a make-style binary goal).
+    def entries_for_goal(goal)
+      if manifest.declared_goals.include?(goal)
+        buildable = manifest.entries_for_goal(goal).select { |e| e.buildable_on?(@host_os, @host_arch) }
+        if buildable.empty?
+          others = manifest.entries_for_goal(goal).map { |e| "#{e.id} (#{e.platform})" }
+          raise Error, "nothing to build on #{@host_os}/#{Platform.display_arch(@host_arch)} for goal #{goal.inspect} " \
+                       "(goal entries: #{others.join(', ')})"
+        end
 
         buildable
+      elsif (entry = manifest.find_entry(goal))
+        host = "#{@host_os}/#{Platform.display_arch(@host_arch)}"
+        unless entry.buildable_on?(@host_os, @host_arch)
+          raise Error,
+                "the entry for goal #{goal.inspect} (#{entry.id}) builds on #{entry.platform}, " \
+                "this host is #{host} — cross-compilation is not supported"
+        end
+
+        [entry]
+      else
+        available = (manifest.declared_goals | manifest.entries.map(&:id)).sort
+        raise Error, "unknown goal #{goal.inspect}; available: #{available.join(', ')} " \
+                     "(or '#{BuildManifest::ALL_GOAL}' for every entry)"
       end
     end
 

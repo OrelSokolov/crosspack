@@ -113,6 +113,179 @@ class BuilderTest < Minitest::Test
     assert_includes error.message, 'nothing to build'
   end
 
+  def test_build_default_goal_builds_only_default_entries
+    m = write_manifest(<<~YAML)
+      name: app
+      version: '1.0'
+      matrix:
+        - id: main
+          build: #{host_platform}
+          goals: [default]
+          steps: [echo main > #{@dir}/main.txt]
+        - id: tools
+          build: #{host_platform}
+          goals: [tools]
+          steps: [echo tools > #{@dir}/tools.txt]
+    YAML
+    result = nil
+    capturing_stdout do
+      result = Crossbuild::Builder.new(m, root: @dir, host_os: host_os, host_arch: host_arch).run(goal: 'default')
+    end
+    assert_equal 1, result.entries.size
+    assert File.exist?(File.join(@dir, 'main.txt'))
+    refute File.exist?(File.join(@dir, 'tools.txt')), 'the tools goal must not build by default'
+  end
+
+  def test_build_named_goal_builds_only_its_entries
+    m = write_manifest(<<~YAML)
+      name: app
+      version: '1.0'
+      matrix:
+        - id: main
+          build: #{host_platform}
+          steps: [echo main > #{@dir}/main.txt]
+        - id: tools
+          build: #{host_platform}
+          goals: [tools]
+          steps: [echo tools > #{@dir}/tools.txt]
+    YAML
+    result = nil
+    capturing_stdout do
+      result = Crossbuild::Builder.new(m, root: @dir, host_os: host_os, host_arch: host_arch).run(goal: 'tools')
+    end
+    assert_equal ['tools'], result.entries.map(&:id)
+    assert File.exist?(File.join(@dir, 'tools.txt'))
+    refute File.exist?(File.join(@dir, 'main.txt')), 'the default goal must not build when another goal was asked'
+  end
+
+  def test_build_all_goal_builds_every_host_entry
+    m = write_manifest(<<~YAML)
+      name: app
+      version: '1.0'
+      matrix:
+        - id: main
+          build: #{host_platform}
+          goals: [default]
+          steps: [echo main > #{@dir}/main.txt]
+        - id: tools
+          build: #{host_platform}
+          goals: [tools]
+          steps: [echo tools > #{@dir}/tools.txt]
+    YAML
+    result = nil
+    capturing_stdout do
+      result = Crossbuild::Builder.new(m, root: @dir, host_os: host_os, host_arch: host_arch).run(goal: 'all')
+    end
+    assert_equal 2, result.entries.size
+    assert File.exist?(File.join(@dir, 'main.txt'))
+    assert File.exist?(File.join(@dir, 'tools.txt'))
+  end
+
+  def test_build_unknown_goal_raises
+    m = write_manifest(<<~YAML)
+      name: app
+      matrix:
+        - id: main
+          build: #{host_platform}
+          steps: ['true']
+        - id: tools
+          build: #{host_platform}
+          goals: [tools]
+          steps: ['true']
+    YAML
+    error = assert_raises(Crossbuild::Error) do
+      capturing_stdout do
+        Crossbuild::Builder.new(m, root: @dir, host_os: host_os, host_arch: host_arch).run(goal: 'nope')
+      end
+    end
+    assert_includes error.message, 'unknown goal "nope"'
+    assert_includes error.message, 'default, main, tools'
+  end
+
+  def test_build_goal_matching_entry_id_builds_that_entry_only
+    # A binary goal: the entry id doubles as a goal name, no `goals:` needed.
+    m = write_manifest(<<~YAML)
+      name: app
+      version: '1.0'
+      matrix:
+        - id: main
+          build: #{host_platform}
+          steps: [echo main > #{@dir}/main.txt]
+        - id: helloworld
+          build: #{host_platform}
+          steps: [echo helloworld > #{@dir}/helloworld.txt]
+    YAML
+    result = nil
+    capturing_stdout do
+      result = Crossbuild::Builder.new(m, root: @dir, host_os: host_os, host_arch: host_arch)
+                                  .run(goal: 'helloworld')
+    end
+    assert_equal ['helloworld'], result.entries.map(&:id)
+    assert File.exist?(File.join(@dir, 'helloworld.txt'))
+    refute File.exist?(File.join(@dir, 'main.txt')), 'the main entry must not build when one binary was asked'
+  end
+
+  def test_build_goal_matching_foreign_entry_id_raises
+    m = write_manifest(<<~YAML)
+      name: app
+      matrix:
+        - id: helloworld
+          build: windows/amd64
+          steps: ['true']
+    YAML
+    skip 'host is windows' if host_os == :windows
+
+    error = assert_raises(Crossbuild::Error) do
+      capturing_stdout do
+        Crossbuild::Builder.new(m, root: @dir, host_os: host_os, host_arch: host_arch).run(goal: 'helloworld')
+      end
+    end
+    assert_includes error.message, 'cross-compilation is not supported'
+  end
+
+  def test_build_goal_without_host_buildable_entries_raises
+    m = write_manifest(<<~YAML)
+      name: app
+      matrix:
+        - id: main
+          build: #{host_platform}
+          steps: ['true']
+        - id: win-tools
+          build: windows/amd64
+          goals: [tools]
+          steps: ['true']
+    YAML
+    skip 'host is windows' if host_os == :windows
+
+    error = assert_raises(Crossbuild::Error) do
+      capturing_stdout do
+        Crossbuild::Builder.new(m, root: @dir, host_os: host_os, host_arch: host_arch).run(goal: 'tools')
+      end
+    end
+    assert_includes error.message, 'nothing to build'
+    assert_includes error.message, 'win-tools (windows/amd64)'
+  end
+
+  def test_crossbuild_build_convenience_api_with_goal
+    m = write_manifest(<<~YAML)
+      name: app
+      version: '1.0'
+      matrix:
+        - id: main
+          build: #{host_platform}
+          steps: [echo main > #{@dir}/main.txt]
+        - id: tools
+          build: #{host_platform}
+          goals: [tools]
+          steps: [echo tools > #{@dir}/tools.txt]
+    YAML
+    capturing_stdout do
+      Crossbuild.build(m, root: @dir, goal: 'tools', host_os: host_os, host_arch: host_arch)
+    end
+    assert File.exist?(File.join(@dir, 'tools.txt'))
+    refute File.exist?(File.join(@dir, 'main.txt'))
+  end
+
   def test_invalid_manifest_raises
     m = write_manifest("name: app\nmatrix: []\n")
     assert_raises(Crossbuild::InvalidManifestError) do

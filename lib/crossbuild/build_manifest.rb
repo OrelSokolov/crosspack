@@ -24,18 +24,22 @@ module Crossbuild
     ARTIFACT_MODES = %w[symlink copy].freeze
     VERSION_SCHEMES = %w[calver git-tag].freeze
     TOP_LEVEL_KEYS = %w[name version output deps matrix].freeze
-    ENTRY_KEYS = %w[id build env steps artifacts].freeze
+    ENTRY_KEYS = %w[id goals build env steps artifacts].freeze
+    DEFAULT_GOAL = 'default'
+    ALL_GOAL = 'all'
     ARTIFACTS_KEYS = %w[from include to mode].freeze
     DEP_KEYS = %w[hosts].freeze
     BUILD_RE = /\A(linux|darwin|windows)\/(#{ARCH_LIST.join('|')})\z/.freeze
     NAME_RE = /\A[a-z0-9][a-z0-9+._-]*\z/i.freeze
 
-    # One matrix entry: where it builds, what it runs, where artifacts go.
+    # One matrix entry: where it builds, what it runs, where artifacts go,
+    # which build goals it belongs to.
     class Entry
-      attr_reader :id, :os, :arch, :env, :steps, :artifacts, :index
+      attr_reader :id, :goals, :os, :arch, :env, :steps, :artifacts, :index
 
-      def initialize(id:, os:, arch:, env:, steps:, artifacts:, index:)
+      def initialize(id:, goals:, os:, arch:, env:, steps:, artifacts:, index:)
         @id = id
+        @goals = goals
         @os = os.to_sym
         @arch = arch
         @env = env
@@ -116,7 +120,8 @@ module Crossbuild
       lines = []
       if valid?
         noun = @entries.size == 1 ? 'entry' : 'entries'
-        lines << "#{path}: the build: section is valid (#{@entries.size} #{noun}: #{@entries.map(&:id).join(', ')})."
+        lines << "#{path}: the build: section is valid (#{@entries.size} #{noun}: #{@entries.map(&:id).join(', ')}; " \
+                 "goals: #{declared_goals.join(', ')})."
       else
         lines << "#{path}: the build: section is invalid (#{@errors.size} errors):"
         @errors.each { |e| lines << "  ✗ #{e}" }
@@ -132,6 +137,16 @@ module Crossbuild
 
     def find_entry(id)
       @entries.find { |e| e.id == id }
+    end
+
+    # Every goal name used by the entries, sorted; an entry without `goals:`
+    # belongs to the implicit `default` goal.
+    def declared_goals
+      @entries.flat_map(&:goals).uniq.sort
+    end
+
+    def entries_for_goal(goal)
+      @entries.select { |e| e.goals.include?(goal) }
     end
 
     # The single matrix entry that distributes artifacts to the given target
@@ -314,6 +329,7 @@ module Crossbuild
       steps = validate_steps(entry['steps'], path)
       env = validate_env(entry['env'], path)
       artifacts = validate_artifacts(entry['artifacts'], path, arch)
+      goals = validate_goals(entry['goals'], path)
       id = entry['id'].nil? ? "#{os}/#{Platform.display_arch(arch == :any ? :x86_64 : arch)}" : entry['id'].to_s
       if entry['id'] && id.empty?
         @errors << Issue.new("#{path}.id", 'must be a non-empty string')
@@ -324,8 +340,29 @@ module Crossbuild
         return
       end
       @warnings << Issue.new(path, 'entry has no steps — existing artifacts only will be distributed') if entry['steps'].nil? && artifacts
-      @entries << Entry.new(id: id, os: os, arch: arch, env: env, steps: steps,
+      @entries << Entry.new(id: id, goals: goals, os: os, arch: arch, env: env, steps: steps,
                             artifacts: artifacts, index: index)
+    end
+
+    # goals: names the make-style build goals this entry belongs to
+    # (crosspack build <goal>); missing -> the implicit `default` goal.
+    def validate_goals(goals, path)
+      return [DEFAULT_GOAL] if goals.nil?
+
+      unless goals.is_a?(Array) && !goals.empty? && goals.all? { |g| g.is_a?(String) && !g.strip.empty? }
+        @errors << Issue.new("#{path}.goals", "must be a non-empty list of goal names, e.g. [#{DEFAULT_GOAL}, tools]")
+        return []
+      end
+      goals.each do |goal|
+        if goal == ALL_GOAL
+          @errors << Issue.new("#{path}.goals", "#{goal.inspect} is reserved — `crosspack build all` builds every goal")
+        elsif goal !~ NAME_RE
+          @errors << Issue.new("#{path}.goals", "invalid goal name #{goal.inspect} (letters, digits, \"+\", \"_\", \"-\", \".\")")
+        end
+      end
+      @errors << Issue.new("#{path}.goals", "duplicate goal names: #{goals.tally.select { |_, n| n > 1 }.keys.join(', ')}") if goals.uniq.size != goals.size
+
+      goals.uniq
     end
 
     def parse_build(build, path)

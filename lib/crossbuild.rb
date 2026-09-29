@@ -18,11 +18,12 @@ require_relative 'crossbuild/builder'
 
 module Crossbuild
   # Convenience wrapper: Crossbuild.build('crosspack.yml') runs every
-  # host-buildable matrix entry and returns Builder::Result. target: builds
-  # the entry distributing to that target only; deps: false skips the
-  # pre-build dependency check/install pass. The manifest argument may be a
-  # Config, a path to crosspack.yml or a ready BuildManifest.
-  def self.build(manifest, entry_id: nil, target: nil, root: Dir.pwd, output_base: nil, version: nil,
+  # host-buildable matrix entry and returns Builder::Result. goal: builds
+  # only the entries declaring that build goal ('all' or nil — every entry);
+  # target: builds the entry distributing to that target only; deps: false
+  # skips the pre-build dependency check/install pass. The manifest argument
+  # may be a Config, a path to crosspack.yml or a ready BuildManifest.
+  def self.build(manifest, entry_id: nil, target: nil, goal: nil, root: Dir.pwd, output_base: nil, version: nil,
                  deps: true, host_os: Platform.os, host_arch: Platform.arch)
     m = case manifest
         when BuildManifest then manifest
@@ -30,6 +31,6 @@ module Crossbuild
         else Crosspack::Config.coerce(manifest, root: root).build_manifest
         end
     Builder.new(m, root: root, output_base: output_base, version: version, deps: deps,
-                host_os: host_os, host_arch: host_arch).run(entry_id: entry_id, target: target)
+                host_os: host_os, host_arch: host_arch).run(entry_id: entry_id, target: target, goal: goal)
   end
 end

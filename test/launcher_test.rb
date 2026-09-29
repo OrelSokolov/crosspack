@@ -129,6 +129,118 @@ class LauncherTest < Minitest::Test
     assert_includes error.message, 'expected the built binary'
   end
 
+  def test_run_builds_only_the_default_goal
+    write_app_binary("echo ran > #{@dir}/ran.txt")
+    write_config_file(<<~YAML)
+      name: app
+      version: '1.0.0'
+      package:
+        maintainer: dev@example.com
+        description: test app
+        sources: builds
+        prefix: usr
+        payload: [app]
+        executables: [app]
+      build:
+        matrix:
+          - build: linux/#{host_platform_arch}
+            steps: [mkdir -p build/bin]
+            artifacts: { from: build/bin, include: [app], to: [ubuntu-24.04] }
+          - id: tools
+            build: linux/#{host_platform_arch}
+            goals: [tools]
+            steps: [echo tools > #{@dir}/tools-built.txt]
+    YAML
+    config = Crosspack::Config.load(File.join(@dir, 'crosspack.yml'))
+
+    status = nil
+    capturing_stdout do
+      status = Crosspack::Launcher.run(config, root: @dir, host_string: HOST_TARGET,
+                                       host_os: :linux, host_arch: host_arch, selectors: ['*'])
+    end
+    assert_equal 0, status
+    assert File.exist?(File.join(@dir, 'ran.txt')), 'the binary did not run'
+    refute File.exist?(File.join(@dir, 'tools-built.txt')), 'run must not build other goals'
+  end
+
+  def test_run_with_goal_builds_only_that_goal
+    # The app entry belongs to the `app` goal only — `run` succeeds only if
+    # the goal really reaches the build stage; the tools goal must not run.
+    write_app_binary("echo ran > #{@dir}/ran.txt")
+    write_config_file(<<~YAML)
+      name: app
+      version: '1.0.0'
+      package:
+        maintainer: dev@example.com
+        description: test app
+        sources: builds
+        prefix: usr
+        payload: [app]
+        executables: [app]
+      build:
+        matrix:
+          - build: linux/#{host_platform_arch}
+            goals: [app]
+            steps: [mkdir -p build/bin]
+            artifacts: { from: build/bin, include: [app], to: [ubuntu-24.04] }
+          - id: tools
+            build: linux/#{host_platform_arch}
+            goals: [tools]
+            steps: [echo tools > #{@dir}/tools-built.txt]
+    YAML
+    config = Crosspack::Config.load(File.join(@dir, 'crosspack.yml'))
+
+    status = nil
+    capturing_stdout do
+      status = Crosspack::Launcher.run(config, root: @dir, goal: 'app', host_string: HOST_TARGET,
+                                       host_os: :linux, host_arch: host_arch, selectors: ['*'])
+    end
+    assert_equal 0, status
+    assert File.exist?(File.join(@dir, 'ran.txt')), 'the binary did not run'
+    refute File.exist?(File.join(@dir, 'tools-built.txt')), 'other goals must not build'
+  end
+
+  def test_run_with_binary_goal_launches_that_binary
+    # `crosspack run helloworld`: builds only the helloworld entry (its id is
+    # the goal) and launches the helloworld executable, not the first one.
+    write_app_binary("echo app > #{@dir}/app-ran.txt")
+    helper = File.join(@dir, 'build', 'bin', 'helloworld')
+    File.write(helper, "#!/bin/sh\necho helloworld > #{@dir}/helloworld-ran.txt\n")
+    FileUtils.chmod(0o755, helper)
+    write_config_file(<<~YAML)
+      name: app
+      version: '1.0.0'
+      package:
+        maintainer: dev@example.com
+        description: test app
+        sources: builds
+        prefix: usr
+        payload: [app, helloworld]
+        executables: [app, helloworld]
+      build:
+        matrix:
+          - build: linux/#{host_platform_arch}
+            goals: [app]
+            steps: [mkdir -p build/bin]
+            artifacts: { from: build/bin, include: [app], to: [ubuntu-24.04] }
+          - id: helloworld
+            build: linux/#{host_platform_arch}
+            goals: [helloworld]
+            steps: [mkdir -p build/bin]
+            artifacts: { from: build/bin, include: [helloworld], to: [ubuntu-24.04] }
+    YAML
+    config = Crosspack::Config.load(File.join(@dir, 'crosspack.yml'))
+
+    status = nil
+    capturing_stdout do
+      status = Crosspack::Launcher.run(config, root: @dir, goal: 'helloworld', host_string: HOST_TARGET,
+                                       host_os: :linux, host_arch: host_arch, selectors: ['*'])
+    end
+    assert_equal 0, status
+    assert File.exist?(File.join(@dir, 'helloworld-ran.txt')), 'the helloworld binary did not run'
+    refute File.exist?(File.join(@dir, 'app-ran.txt')), 'the first executable must not run when a binary goal was asked'
+  end
+
   def test_install_launches_package_with_override
     write_package('app_1.0.0_amd64.deb')
     config = write_config(<<~YAML)
