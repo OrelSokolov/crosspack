@@ -81,11 +81,28 @@ module Crosspack
       fallback = rule['*']
       return fallback unless fallback.nil?
 
-      versions = rule.keys.map { |v| v == '*' ? '"*" (any)' : v.inspect }.join(', ')
-      raise ResolveError,
-            "#{name}: no rules for #{family} #{target.version.inspect} and no \"*\" key. " \
-            "Versions described in the file: #{versions}. Add targets.#{family}.\"#{target.version}\" " \
-            'or a "*" wildcard rule'
+      newest = newest_version_key(rule.keys)
+      if newest.nil?
+        versions = rule.keys.map { |v| v == '*' ? '"*" (any)' : v.inspect }.join(', ')
+        raise ResolveError,
+              "#{name}: no rules for #{family} #{target.version.inspect} and no \"*\" key. " \
+              "Versions described in the file: #{versions}. Add targets.#{family}.\"#{target.version}\" " \
+              'or a "*" wildcard rule'
+      end
+
+      warn Colors.yellow(
+        "#{name}: no recipe for #{family} #{target.version.inspect} — " \
+        "using the rules of the newest described version #{newest.inspect}. " \
+        "Add targets.#{family}.\"#{target.version}\" or a \"*\" wildcard to pin it explicitly"
+      )
+      rule[newest]
+    end
+
+    # The newest version key among the described ones ("24.10" beats "24.4",
+    # which beats "9"), comparing dot-separated numeric segments.
+    def newest_version_key(keys)
+      keys.reject { |k| k == '*' }
+          .max_by { |k| k.split('.').map(&:to_i) }
     end
   end
 end

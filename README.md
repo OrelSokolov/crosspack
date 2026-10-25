@@ -197,6 +197,8 @@ deps:
       fedora: { "*": [webkit2gtk4.1] }
       macos: system      # OS component
       windows: system    # preinstalled (WebView2)
+  # An undescribed version (ubuntu-26.04) falls back to the newest described
+  # version of the family with a warning; only a family with no rules errors.
 
 # host-only launch hooks (optional): same host selectors as build.deps
 run:                       # `crosspack run`: how to launch the built binary
