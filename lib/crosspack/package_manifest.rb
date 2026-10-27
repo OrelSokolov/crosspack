@@ -40,6 +40,13 @@ module Crosspack
       @errors.empty?
     end
 
+    # An absent section is legitimate: `crosspack pack` then saves the raw
+    # build artifacts as-is (no packaging layout) — the "binary only" mode
+    # for console applications.
+    def present?
+      @raw.is_a?(Hash) && !@raw.empty?
+    end
+
     def validate!
       return self if valid?
 
@@ -50,6 +57,11 @@ module Crosspack
     end
 
     def error_report
+      unless present?
+        return "#{path}: the package: section is absent — pack saves the raw build " \
+               'artifacts as-is (binary-only mode).'
+      end
+
       if valid?
         "#{path}: the package: section is valid."
       else
@@ -81,7 +93,8 @@ module Crosspack
     end
 
     def sources
-      @data['sources']
+      # 'builds' in binary-only mode — the same default the build stage uses.
+      @data['sources'] || 'builds'
     end
 
     def prefix
@@ -151,12 +164,8 @@ module Crosspack
     private
 
     def validate
-      unless @raw.is_a?(Hash) && !@raw.empty?
-        @errors << Issue.new('(root)',
-                             'the package: section of crosspack.yml is missing or empty — ' \
-                             'the pack stage needs it (maintainer, description, payload, ...)')
-        return
-      end
+      # Absent section = binary-only mode (raw artifacts); nothing to check.
+      return unless present?
 
       if @data['name'].nil?
         @errors << Issue.new('name', 'is required at the top level of crosspack.yml, e.g. name: myapp')

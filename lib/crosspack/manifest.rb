@@ -58,6 +58,12 @@ module Crosspack
       @errors.empty?
     end
 
+    # An absent section is legitimate in binary-only mode (no package: —
+    # no runtime Depends line to describe).
+    def present?
+      @raw.is_a?(Hash) && !@raw.empty?
+    end
+
     # Raises with the full, formatted list of problems.
     def validate!
       return self if valid?

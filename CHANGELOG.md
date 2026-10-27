@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-10-27
+
+### Added
+- Binary-only projects: the `package:` section is now optional. Without it
+  `crosspack pack` saves the raw build artifacts as-is — the built binaries
+  copied unchanged into `crosspacks/<family>[/<version>]/<arch>/`, no
+  packaging layout, no version resolution. `crosspack validate` accepts a
+  manifest with no package section; the `deps:` section may be omitted too
+  (no package — no runtime Depends line to describe).
+- Custom pack command: an optional `pack:` section (`hosts:` selectors like
+  `install:`/`run:`) overrides the native pack stage —
+  `pack: hosts: { "*": rake package }`. Placeholders: the usual facts plus
+  `{{path}}` (the pack output dir) and `{{build}}` (the target's build
+  artifacts dir).
+- `crosspack install` without a `package:` section runs a custom `install:`
+  command without requiring a prior pack stage — the command carries the
+  install itself (e.g. `rake install` copying the binary to `~/.carat/bin`).
+
+[0.10.0]: https://github.com/OrelSokolov/crosspack/releases/tag/v0.10.0
+
 ## [0.9.0] - 2026-10-25
 
 ### Changed

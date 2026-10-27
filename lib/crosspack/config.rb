@@ -15,7 +15,7 @@ module Crosspack
   # happens per section, not per file.
   class Config
     DEFAULT_PATH = 'crosspack.yml'
-    TOP_LEVEL_KEYS = %w[name version build package deps run install].freeze
+    TOP_LEVEL_KEYS = %w[name version build package deps run install pack].freeze
     NAME_RE = /\A[a-z0-9][a-z0-9+._-]*\z/i.freeze
 
     attr_reader :path, :errors, :warnings
@@ -88,6 +88,12 @@ module Crosspack
 
     def install_manifest
       @install_manifest ||= CommandManifest.new(@path, @raw['install'], 'install')
+    end
+
+    # The optional pack: section — a custom packing command overriding the
+    # native pack stage (same hosts: selector vocabulary as install:/run:).
+    def pack_manifest
+      @pack_manifest ||= CommandManifest.new(@path, @raw['pack'], 'pack')
     end
 
     private

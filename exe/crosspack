@@ -125,14 +125,17 @@ when 'validate'
   pkg = config.package_manifest
   build_manifest = config.build_manifest
   puts colorized_report(config.error_report)
-  puts colorized_report(deps_manifest.error_report)
+  # deps: is required only when there is a package to carry Depends lines;
+  # a binary-only project (no package:) may omit it.
+  puts colorized_report(deps_manifest.error_report) if deps_manifest.present? || pkg.present?
   puts colorized_report(pkg.error_report)
   puts colorized_report(build_manifest.error_report)
-  [config.run_manifest, config.install_manifest].each do |m|
+  [config.run_manifest, config.install_manifest, config.pack_manifest].each do |m|
     puts colorized_report(m.error_report) if m.present?
   end
-  ok = config.valid? && deps_manifest.valid? && pkg.valid? && build_manifest.valid? &&
-       config.run_manifest.valid? && config.install_manifest.valid?
+  ok = config.valid? && (deps_manifest.present? || !pkg.present? ? deps_manifest.valid? : true) &&
+       pkg.valid? && build_manifest.valid? &&
+       config.run_manifest.valid? && config.install_manifest.valid? && config.pack_manifest.valid?
   exit(ok ? 0 : 1)
 when 'matrix'
   deps_manifest = config.deps_manifest
@@ -224,13 +227,22 @@ when 'pack'
   target_str = positional || host_target!('pack')
   begin
     target = Crosspack::Target.parse(target_str, arch: options[:arch])
-    path = Crosspack.pack(
-      config: config,
-      target: target,
-      version: options[:version],
-      root: options[:root],
-      output_base: options[:output_base] || 'crosspacks'
-    )
+    output_base = options[:output_base] || 'crosspacks'
+    # A custom pack: command overrides the native pack stage.
+    custom = config.pack_manifest.command_for(Crossbuild::Platform.selectors)
+    path = if custom
+             Crosspack::Launcher.pack(config, target: target, command: custom,
+                                      version: options[:version], root: options[:root],
+                                      output_base: output_base)
+           else
+             Crosspack.pack(
+               config: config,
+               target: target,
+               version: options[:version],
+               root: options[:root],
+               output_base: output_base
+             )
+           end
   rescue Crosspack::Target::Error => e
     abort_with "Invalid target #{target_str.inspect}: #{e.message}"
   rescue Crosspack::InvalidManifestError, Crosspack::ResolveError, Crosspack::BuildError => e

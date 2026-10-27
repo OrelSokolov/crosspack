@@ -74,9 +74,11 @@ class ConfigTest < Minitest::Test
     refute build.valid?
     assert(build.errors.any? { |e| e.path == '(root)' && e.message.include?('build: section') })
 
+    # package: is optional — absent means binary-only mode (raw artifacts)
     pkg = config.package_manifest
-    refute pkg.valid?
-    assert(pkg.errors.any? { |e| e.path == '(root)' && e.message.include?('package: section') })
+    assert pkg.valid?
+    refute pkg.present?
+    assert_includes pkg.error_report, 'raw build artifacts'
 
     deps = config.deps_manifest
     refute deps.valid?
@@ -166,3 +168,13 @@ class ConfigTest < Minitest::Test
     end
   end
 end
+
+  def test_pack_section_key_is_allowed
+    config = load_config_section('pack', <<~YAML)
+      hosts:
+        "*": rake package
+    YAML
+    assert config.valid?, config.errors.map(&:to_s).join('; ')
+    assert config.pack_manifest.valid?
+    assert_equal 'rake package', config.pack_manifest.command_for(['*'])
+  end

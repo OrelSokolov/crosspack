@@ -58,7 +58,10 @@ module Crosspack
     end
 
     # Finds the package packed for this host in crosspacks/ and launches it
-    # with the system installer. Returns the launched process's exit code.
+    # with the system installer. A custom install: command carries the
+    # install itself — without a package: section it is the only mode
+    # (binary-only projects install the raw binary, e.g. a rake task).
+    # Returns the launched process's exit code.
     def self.install(config, root: Dir.pwd, args: [], output_base: 'crosspacks',
                      host_string: nil, host_os: Crossbuild::Platform.os,
                      host_arch: Crossbuild::Platform.arch, selectors: Crossbuild::Platform.selectors)
@@ -67,14 +70,50 @@ module Crosspack
       pkg = validated_package(config)
 
       command = config.install_manifest.command_for(selectors)
-      raise Error, pkgbuild_hint(target, root, output_base) if command.nil? && target.format == :pkgbuild
 
-      # {{path}} resolves to the package file (for arch: the PKGBUILD dir).
-      path = target.format == :pkgbuild ? packed_dir(target, root, output_base)
-                                        : package_file(target, pkg, root, output_base)
+      # The custom command's build artifacts dir ({{build}}) — crosspack
+      # build's output for the target, so a plain copy installs it.
+      build_dir = File.expand_path(target.output_dir(pkg.sources, target.format), root)
+      path =
+        if command && pkg.present?
+          # {{path}} resolves to the package file (for arch: the PKGBUILD dir).
+          target.format == :pkgbuild ? packed_dir(target, root, output_base)
+                                     : package_file(target, pkg, root, output_base)
+        elsif command
+          # Binary-only mode: the command does not need a packed tree;
+          # {{path}} points at where `crosspack pack` would put the raw copy.
+          packed_dir(target, root, output_base)
+        elsif !pkg.present?
+          raise Error,
+                'install: nothing to install — no package: section (raw artifacts only) and ' \
+                'no custom install: command in crosspack.yml. Add an install: hosts: rule ' \
+                '(e.g. `rake install` copying the binary) or a package: section.'
+        elsif target.format == :pkgbuild
+          raise Error, pkgbuild_hint(target, root, output_base)
+        else
+          package_file(target, pkg, root, output_base)
+        end
       command ||= default_install_command(target.format)
 
-      execute(command, path: path, pkg: pkg, target: target, root: root, args: args)
+      execute(command, path: path, pkg: pkg, target: target, root: root, args: args,
+              extra_vars: { build: build_dir })
+    end
+
+    # Runs a custom pack: command (crosspack.yml `pack: hosts: <selector>:
+    # <command>`) instead of native packing. Placeholders: the usual facts
+    # plus {{path}} — the pack output dir for the target — and {{build}} —
+    # the target's build artifacts dir. Returns {{path}} on success.
+    def self.pack(config, target:, command:, version: nil, root: Dir.pwd,
+                  output_base: 'crosspacks')
+      config = Config.coerce(config, root: root)
+      pkg = config.package_manifest
+      build_dir = File.expand_path(target.output_dir(pkg.sources, target.format), root)
+      out_dir = File.expand_path(target.output_dir(output_base, target.format), root)
+      code = execute(command, path: out_dir, pkg: pkg, target: target, root: root,
+                     args: [], extra_vars: { build: build_dir }, version: version)
+      raise Error, "pack command failed (exit #{code})" unless code.zero?
+
+      out_dir
     end
 
     # -- defaults ------------------------------------------------------------
@@ -178,15 +217,15 @@ module Crosspack
 
       # Expands the {{...}} placeholders, appends extra CLI args and runs the
       # command from the project root, passing the child's exit code through.
-      def execute(command, path:, pkg:, target:, root:, args:)
+      def execute(command, path:, pkg:, target:, root:, args:, extra_vars: {}, version: nil)
         vars = {
           name: pkg.name,
-          version: Builds.version_for(target, File.expand_path(pkg.sources, root)).to_s,
+          version: version || Builds.version_for(target, File.expand_path(pkg.sources, root)).to_s,
           os: target.family.to_s,
           arch: Crossbuild::Platform.display_arch(target.arch == :any ? :x86_64 : target.arch),
           platform: target.to_s,
           path: path
-        }
+        }.merge(extra_vars)
         command = Crossbuild::Runner.new(root: root, vars: vars).interpolate(command)
         command = "#{command} #{args.join(' ')}" unless args.empty?
 

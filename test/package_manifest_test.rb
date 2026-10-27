@@ -177,3 +177,14 @@ class PackageManifestTest < Minitest::Test
     assert_includes error.message, 'ubuntu-24.04'
   end
 end
+
+  # Binary-only mode: an absent package: section is legitimate — pack then
+  # saves the raw build artifacts as-is.
+  def test_absent_section_is_valid_raw_mode
+    m = Crosspack::PackageManifest.new('/tmp/x/crosspack.yml', nil)
+    assert m.valid?, m.errors.map(&:to_s).join('; ')
+    refute m.present?
+    assert_includes m.error_report, 'raw build artifacts'
+    assert_equal 'builds', m.sources # default, same as the build stage
+    assert_empty m.executables_for(nil)
+  end

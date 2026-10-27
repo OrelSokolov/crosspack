@@ -321,3 +321,23 @@ class PackerTest < Minitest::Test
     assert_includes plist, '<string>12.0</string>'
   end
 end
+
+  # Binary-only mode: no package: section — pack saves the raw build
+  # artifacts as-is, no packaging layout, no version stamp needed.
+  def test_pack_raw_without_package_section_copies_artifacts
+    File.write(File.join(@root, 'crosspack.yml'), <<~YAML)
+      name: app
+    YAML
+    path = pack('debian-12')
+    dst = File.join(@root, 'crosspacks', 'debian', '12', 'amd64')
+    assert_equal File.expand_path(dst), path
+    assert File.executable?(File.join(path, 'app'))
+    assert_equal 'model', File.read(File.join(path, 'model.bin'))
+  end
+
+  def test_pack_raw_missing_build_dir_gives_actionable_error
+    File.write(File.join(@root, 'crosspack.yml'), "name: app\n")
+    e = assert_raises(Crosspack::BuildError) { pack('macos/arm64') }
+    assert_includes e.message, 'Build stage not done'
+    assert_includes e.message, 'crosspack build macos'
+  end

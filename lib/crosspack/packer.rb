@@ -32,6 +32,11 @@ module Crosspack
       @pkg = @config.package_manifest
       @deps = @config.deps_manifest
       validate_both!
+
+      # Binary-only mode: no package: section — save the built artifacts
+      # as-is, no packaging layout.
+      return pack_raw unless @pkg.present?
+
       resolve_version!
       @pkg_data = build_layout
 
@@ -54,6 +59,25 @@ module Crosspack
 
     private
 
+    # Copies everything the build produced for the target into the output
+    # tree unchanged: crosspacks/<family>[/<version>]/<arch>/ mirrors
+    # builds/<family>[/<version>]/<arch>/. No version resolution — the
+    # artifacts keep their built file names.
+    def pack_raw
+      src_dir = File.expand_path(@target.output_dir(@pkg.sources, @target.format), @root)
+      unless File.directory?(src_dir)
+        raise BuildError,
+              "Build stage not done for target #{@target}: expected compiled artifacts in #{src_dir}.\n" \
+              "Run: crosspack build #{@target}"
+      end
+
+      abs_dst = File.expand_path(@target.output_dir(@output_base, @target.format), @root)
+      FileUtils.rm_rf(abs_dst)
+      FileUtils.mkdir_p(abs_dst)
+      Dir.children(src_dir).each { |entry| FileUtils.cp_r(File.join(src_dir, entry), abs_dst) }
+      abs_dst
+    end
+
     # --version wins; otherwise the version recorded by the build stage.
     def resolve_version!
       return unless @version.nil? || @version.strip.empty?
@@ -73,7 +97,9 @@ module Crosspack
       errors = []
       errors << @config.error_report unless @config.valid?
       errors << @pkg.error_report unless @pkg.valid?
-      errors << @deps.error_report unless @deps.valid?
+      # deps: describe the packed package's runtime libraries — nothing to
+      # resolve in binary-only mode (raw artifacts, no Depends line).
+      errors << @deps.error_report unless @deps.valid? || !@pkg.present?
       return if errors.empty?
 
       raise InvalidManifestError, errors.join("\n")
