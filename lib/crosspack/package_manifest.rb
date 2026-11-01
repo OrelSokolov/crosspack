@@ -151,6 +151,19 @@ module Crosspack
       @data['desktop'].is_a?(Hash) ? @data['desktop'] : nil
     end
 
+    # Launcher arguments from desktop:args — a whitespace-separated
+    # string or a list of tokens, normalized to a list. They ride the
+    # .desktop Exec= line, the WiX shortcut Arguments and the macOS
+    # CFBundleArguments alike.
+    def desktop_args
+      value = desktop && desktop['args']
+      case value
+      when String then value.split
+      when Array then value.map(&:to_s).reject { |a| a.strip.empty? }
+      else []
+      end
+    end
+
     def icon
       @data['icon']
     end
@@ -334,8 +347,22 @@ module Crosspack
       return if value.nil?
 
       unless value.is_a?(Hash) && !value.empty?
-        @errors << Issue.new('desktop', 'must be a mapping: name, comment, categories, exec (optional)')
+        @errors << Issue.new('desktop', 'must be a mapping: name, comment, categories, exec, args (optional)')
+        return
       end
+
+      args = value['args']
+      return if args.nil?
+
+      valid = if args.is_a?(String)
+                !args.strip.empty?
+              elsif args.is_a?(Array) && !args.empty?
+                args.all? { |a| a.is_a?(String) && !a.strip.empty? }
+              end
+      return if valid
+
+      @errors << Issue.new('desktop.args',
+                           'must be a non-empty string or a list of non-empty strings (launcher arguments)')
     end
   end
 end

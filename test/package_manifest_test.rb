@@ -40,6 +40,28 @@ class PackageManifestTest < Minitest::Test
     assert_equal 'Proprietary', m.license
   end
 
+  def test_desktop_args_string_list_and_absent
+    assert_equal [], load(VALID).desktop_args
+
+    m = load(VALID + "  args: --no-dir\n")
+    assert m.valid?, m.errors.map(&:to_s).join('; ')
+    assert_equal ['--no-dir'], m.desktop_args
+
+    m = load(VALID + "  args: [--no-dir, --theme, Dark]\n")
+    assert m.valid?, m.errors.map(&:to_s).join('; ')
+    assert_equal ['--no-dir', '--theme', 'Dark'], m.desktop_args
+  end
+
+  def test_desktop_args_invalid_values_are_errors
+    m = load(VALID + "  args: 42\n")
+    refute m.valid?
+    assert_includes m.errors.map(&:path), 'desktop.args'
+
+    m = load(VALID + "  args: [--ok, '']\n")
+    refute m.valid?
+    assert_includes m.errors.map(&:path), 'desktop.args'
+  end
+
   def test_missing_required_fields_are_all_reported
     m = load("summary: x\n")
     assert_equal 5, m.errors.size

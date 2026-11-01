@@ -140,6 +140,41 @@ class BuildersTest < Minitest::Test
     assert_includes wxs, '<ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />'
   end
 
+  def test_wix_shortcuts_carry_arguments
+    wxs = Crosspack::Builders::Wix.generate_wxs(
+      name: 'app', version: '1.0.0', manufacturer: 'Test',
+      summary: 'Test app', files: { @bin => 'app' },
+      shortcuts: { name: 'App', target: 'app', arguments: '--no-dir' }
+    )
+    assert_equal 2, wxs.scan('Arguments="--no-dir"').size
+    # Without arguments nothing changes.
+    wxs = Crosspack::Builders::Wix.generate_wxs(
+      name: 'app', version: '1.0.0', manufacturer: 'Test',
+      summary: 'Test app', files: { @bin => 'app' },
+      shortcuts: { name: 'App', target: 'app' }
+    )
+    refute_includes wxs, 'Arguments='
+  end
+
+  def test_app_dir_plist_carries_cfbundlearguments
+    plist = File.join(@tmpdir, 'Info.plist')
+    Crosspack::Builders::AppDir.write_info_plist(
+      plist, name: 'app', version: '1.0.0', summary: 'Test app',
+      executable: 'app', display_name: 'App',
+      arguments: ['--no-dir', '--theme', 'Dark']
+    )
+    content = File.read(plist)
+    assert_includes content, '<key>CFBundleArguments</key>'
+    assert_includes content, '<string>--no-dir</string>'
+    assert_includes content, '<string>Dark</string>'
+
+    Crosspack::Builders::AppDir.write_info_plist(
+      plist, name: 'app', version: '1.0.0', summary: 'Test app',
+      executable: 'app', display_name: 'App'
+    )
+    refute_includes File.read(plist), 'CFBundleArguments'
+  end
+
   def test_wix_sanitize_manufacturer_strips_deb_style_email
     assert_equal 'Oleg Orlov', Crosspack::Builders::Wix.sanitize_manufacturer('Oleg Orlov <o@example.com>')
     assert_equal 'someone@example.com',

@@ -122,6 +122,20 @@ class PackerTest < Minitest::Test
     refute_includes listing, 'pixmaps'
   end
 
+  def test_pack_deb_desktop_args_ride_the_exec_line
+    yml = File.read(File.join(@root, 'crosspack.yml')).sub(
+      "desktop:\n", "desktop:\n    args: --no-dir --theme Dark\n"
+    )
+    File.write(File.join(@root, 'crosspack.yml'), yml)
+
+    path = pack('debian-12')
+    Dir.mktmpdir do |x|
+      Open3.capture2e('dpkg-deb', '-x', path, x)
+      entry = File.read(File.join(x, 'usr/local/share/applications/app.desktop'))
+      assert_includes entry, 'Exec=/usr/local/bin/app --no-dir --theme Dark'
+    end
+  end
+
   def test_pack_pkgbuild
     path = pack('arch')
     assert File.file?(path)

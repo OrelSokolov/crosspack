@@ -152,12 +152,15 @@ module Crosspack
       # value like "Utility;Audio" would otherwise produce an invalid entry.
       categories = d['categories'].to_s.empty? ? 'Utility;' : d['categories'].to_s
       categories += ';' unless categories.end_with?(';')
+      # desktop:args ride along whichever command line the entry uses —
+      # the exec: override or the default launcher path.
+      exec_line = [d['exec'] || desktop_exec, *@pkg.desktop_args].join(' ')
       File.write(path, <<~DESKTOP)
         [Desktop Entry]
         Type=Application
         Name=#{d['name'] || @pkg.name}
         Comment=#{d['comment'] || @pkg.summary}
-        Exec=#{d['exec'] || desktop_exec}
+        Exec=#{exec_line}
         Icon=#{@pkg.name}
         Terminal=false
         Categories=#{categories}
@@ -349,13 +352,16 @@ module Crosspack
     end
 
     # Shortcut facts for the MSI: the display name from desktop: (falling
-    # back to the package name) and the first executable as the target.
+    # back to the package name), the first executable as the target and
+    # the desktop:args launcher arguments.
     def windows_shortcuts
       target = @pkg.executables_for(@target).first
       return nil if target.nil?
 
+      args = @pkg.desktop_args
       { name: (@pkg.desktop && @pkg.desktop['name']) || @pkg.name,
-        target: target }
+        target: target,
+        arguments: args.empty? ? nil : args.join(' ') }
     end
 
     # macOS: .app bundle staging; DMG itself requires a Mac (hdiutil).
@@ -373,6 +379,7 @@ module Crosspack
         executables: @pkg.executables_for(@target),
         icon: @pkg.icon && File.expand_path(@pkg.icon, @root),
         min_macos: @pkg.min_macos,
+        arguments: @pkg.desktop_args.empty? ? nil : @pkg.desktop_args,
         output: output_dir
       )
     end

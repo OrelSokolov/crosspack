@@ -184,6 +184,8 @@ package:
     name: MyApp
     comment: Cross-platform desktop application
     categories: Utility;Audio
+    args: --no-dir           # optional launcher arguments: .desktop Exec=,
+                             # WiX shortcut Arguments, macOS CFBundleArguments
 
   icon: build/appicon.png    # optional, -> <prefix>/share/pixmaps/<name>.png
 

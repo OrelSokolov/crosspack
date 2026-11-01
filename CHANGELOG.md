@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-11-01
+
+### Added
+- Launcher arguments: an optional `desktop: args:` value (a whitespace-separated
+  string or a list of tokens) is carried into every platform's launcher — the
+  `.desktop` `Exec=` line (appended to `exec:` or the default launcher path),
+  the WiX Start Menu / Desktop shortcuts (`Arguments` attribute) and the macOS
+  `.app` bundle (`CFBundleArguments` in Info.plist). Typical use: launching a
+  GUI app folderless (`args: --no-dir`) when its cwd would otherwise be a huge
+  directory like `$HOME`.
+
+[0.11.0]: https://github.com/OrelSokolov/crosspack/releases/tag/v0.11.0
+
 ## [0.10.0] - 2026-10-27
 
 ### Added

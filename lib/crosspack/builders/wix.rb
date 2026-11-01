@@ -62,10 +62,11 @@ module Crosspack
         "{\\rtf1\\ansi\n#{lines.join("\\par\n")}\n}\n"
       end
 
-      # shortcuts: nil, or { name: "Display Name", target: "app.exe" } (the
-      # payload file inside INSTALLFOLDER the shortcuts launch) — installs
-      # Start Menu and Desktop shortcuts. icon: local path to an .ico for
-      # the Add/Remove Programs entry (ARPPRODUCTICON), or nil.
+      # shortcuts: nil, or { name: "Display Name", target: "app.exe",
+      # arguments: "--flag" (optional, desktop:args) } (the payload file
+      # inside INSTALLFOLDER the shortcuts launch) — installs Start Menu
+      # and Desktop shortcuts. icon: local path to an .ico for the
+      # Add/Remove Programs entry (ARPPRODUCTICON), or nil.
       def self.generate_wxs(name:, version:, manufacturer:, summary:, files:,
                             arch: 'x64', shortcuts: nil, icon: nil)
         license_rtf_file = "#{name}-license.rtf"
@@ -123,19 +124,22 @@ module Crosspack
 
       # Start Menu + Desktop shortcuts for the main executable. The shortcut
       # component's KeyPath is a marker registry value (a shortcut cannot be
-      # a KeyPath itself); the icon comes from the exe.
+      # a KeyPath itself); the icon comes from the exe. shortcuts[:arguments]
+      # (desktop:args) becomes each shortcut's Arguments attribute.
       def self.shortcuts_fragment(shortcuts)
         name = escape(shortcuts[:name])
         target = escape(shortcuts[:target])
+        args_attr = shortcuts[:arguments] ?
+                      "\n                          Arguments=\"#{escape(shortcuts[:arguments])}\"" : nil
         <<~XML
           <Fragment>
             <ComponentGroup Id="Shortcuts" Directory="INSTALLFOLDER">
               <Component Id="c.shortcuts" Guid="*">
                 <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder"
-                          Name="#{name}" Target="[INSTALLFOLDER]#{target}"
+                          Name="#{name}" Target="[INSTALLFOLDER]#{target}"#{args_attr}
                           WorkingDirectory="INSTALLFOLDER" />
                 <Shortcut Id="DesktopShortcut" Directory="DesktopFolder"
-                          Name="#{name}" Target="[INSTALLFOLDER]#{target}"
+                          Name="#{name}" Target="[INSTALLFOLDER]#{target}"#{args_attr}
                           WorkingDirectory="INSTALLFOLDER" />
                 <RegistryValue Root="HKLM" Key="Software\\#{name}"
                                Name="installed" Type="integer" Value="1" KeyPath="yes" />

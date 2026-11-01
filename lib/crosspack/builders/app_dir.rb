@@ -13,9 +13,10 @@ module Crosspack
       # executables: basenames to chmod 0755 (the first one is the bundle's
       #   CFBundleExecutable, falling back to the package name)
       # icon: path to the bundle icon, copied into Contents/Resources
+      # arguments: launcher argument tokens (desktop:args) → CFBundleArguments
       def self.build(name:, version:, summary:, files:, executables: [],
                      display_name: nil, icon: nil, identifier: nil,
-                     min_macos: '11.0', output:)
+                     min_macos: '11.0', arguments: nil, output:)
         app_dir = File.join(output, "#{name}.app")
         FileUtils.rm_rf(app_dir)
         macos_dir = File.join(app_dir, 'Contents', 'MacOS')
@@ -50,7 +51,7 @@ module Crosspack
                          executable: executables.first || name,
                          display_name: display_name || name,
                          icon_file: icon_file, identifier: identifier,
-                         min_macos: min_macos)
+                         min_macos: min_macos, arguments: arguments)
 
         File.write(File.join(output, 'BUILD-DMG.txt'), <<~TXT)
           DMG not built: hdiutil only exists on macOS.
@@ -62,7 +63,7 @@ module Crosspack
 
       def self.write_info_plist(path, name:, version:, summary:, executable:,
                                 display_name:, icon_file: nil, identifier: nil,
-                                min_macos: '11.0')
+                                min_macos: '11.0', arguments: nil)
         bundle_id = identifier || "org.crosspack.#{name}"
         # Without the extension .icns is assumed; other formats (png) must
         # be named in full.
@@ -99,6 +100,7 @@ module Crosspack
             <key>NSMicrophoneUsageDescription</key>
             <string>#{escape(summary)}</string>
           #{plist_icon_entry(icon_ref)}
+          #{plist_arguments_entry(arguments)}
           </dict>
           </plist>
         PLIST
@@ -108,6 +110,16 @@ module Crosspack
         return '' if icon_ref.nil?
 
         "    <key>CFBundleIconFile</key>\n    <string>#{escape(icon_ref)}</string>"
+      end
+
+      # Launcher arguments (desktop:args) → CFBundleArguments: LaunchServices
+      # passes them to the executable when the bundle opens.
+      def self.plist_arguments_entry(args)
+        return '' if args.nil? || args.empty?
+
+        "    <key>CFBundleArguments</key>\n    <array>\n" +
+          args.map { |a| "      <string>#{escape(a)}</string>" }.join("\n") +
+          "\n    </array>"
       end
 
       # Escapes XML entities so manifest values never break the plist.
